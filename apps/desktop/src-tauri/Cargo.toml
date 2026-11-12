@@ -1,0 +1,19 @@
+[package]
+name = "harpoon-desktop"
+version = "0.1.0"
+description = "Harpoon Reimagined maritime command simulation"
+authors = ["Harpoon Reimagined contributors"]
+license = "UNLICENSED"
+edition = "2021"
+
+[lib]
+name = "harpoon_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+harpoon-simulation-core = { path = "../../../src/simulation-core" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }

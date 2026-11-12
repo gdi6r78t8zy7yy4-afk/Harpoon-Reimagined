@@ -1,0 +1,25 @@
+# OS and editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Build output
+build/
+dist/
+target/
+node_modules/
+
+# Local state and secrets
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs
+*.log
+
+# Generated Tauri schemas
+**/src-tauri/gen/schemas/
