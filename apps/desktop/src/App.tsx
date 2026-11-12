@@ -3,11 +3,11 @@ import {
   Activity, Anchor, Bell, ChevronDown, ChevronRight, CircleHelp, Crosshair, Eye,
   Gauge, Globe2, Layers3, LocateFixed, Maximize2, Menu, Minus, MoreHorizontal,
   Pause, Play, Plus, Radio, Search, Settings2, Shield, Ship, SlidersHorizontal,
-  Sparkles, Target, Waves, X,
+  Sparkles, Target, Waves, X, Save, FolderOpen,
 } from 'lucide-react'
 import { TacticalScene } from './components/TacticalScene'
-import { advance, classifyContact, issueCourse, issueSpeed, loadScenario, loadState, setRunning } from './simulation'
-import type { Contact, SimulationState, Unit } from './types'
+import { advance, campaignStatus, classifyContact, issueCourse, issueSpeed, loadCampaign, loadScenario, loadState, saveCampaign, setRunning } from './simulation'
+import type { CampaignStatus, Contact, SimulationState, Unit } from './types'
 
 const timeLabel = (seconds: number) => {
   const hours = Math.floor(seconds / 3600).toString().padStart(2, '0')
@@ -18,6 +18,7 @@ const timeLabel = (seconds: number) => {
 
 function App() {
   const [state, setState] = useState<SimulationState | null>(null)
+  const [campaign, setCampaign] = useState<CampaignStatus | null>(null)
   const [selectedId, setSelectedId] = useState('ddg-01')
   const [tab, setTab] = useState<'forces' | 'sensors'>('forces')
   const [scale, setScale] = useState(5)
@@ -25,7 +26,14 @@ function App() {
   const [notice, setNotice] = useState('')
   const [orderPanel, setOrderPanel] = useState<'course' | 'speed' | null>(null)
 
-  useEffect(() => { void loadState().then(setState) }, [])
+  useEffect(() => {
+    void Promise.all([loadState(), campaignStatus()]).then(([initialState, initialCampaign]) => {
+      setState(initialState)
+      setCampaign(initialCampaign)
+      setScale(initialCampaign.settings.timeScale)
+      setShowLayers(initialCampaign.settings.layersVisible)
+    })
+  }, [])
 
   const tick = useCallback(async (seconds: number) => {
     const next = await advance(seconds)
@@ -47,6 +55,7 @@ function App() {
     try {
       const next = await action()
       setState(next)
+      if (next.missionComplete) setCampaign(await campaignStatus())
       setOrderPanel(null)
       setNotice(message)
     } catch (error) {
@@ -67,6 +76,37 @@ function App() {
     setNotice(next.running ? 'Simulation resumed' : 'Simulation paused')
     window.setTimeout(() => setNotice(''), 2200)
   }
+
+  const saveCampaignNow = async () => {
+    try {
+      const status = await saveCampaign({ timeScale: scale, layersVisible: showLayers })
+      setCampaign(status)
+      setNotice('Campaign saved on this Mac')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Campaign save failed')
+    }
+    window.setTimeout(() => setNotice(''), 2600)
+  }
+
+  const loadSavedCampaign = async () => {
+    try {
+      const loaded = await loadCampaign()
+      setState(loaded.simulation)
+      setCampaign(loaded.status)
+      setScale(loaded.status.settings.timeScale)
+      setShowLayers(loaded.status.settings.layersVisible)
+      setSelectedId('ddg-01')
+      setOrderPanel(null)
+      setNotice('Campaign restored')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Campaign could not be loaded')
+    }
+    window.setTimeout(() => setNotice(''), 2600)
+  }
+
+  const savedAtLabel = campaign?.savedAt
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(campaign.savedAt)
+    : 'No save on this device'
 
   const zoomMap = (factor: number) => window.dispatchEvent(new CustomEvent('harpoon:zoom', { detail: factor }))
 
@@ -140,6 +180,7 @@ function App() {
           <div className="right-heading"><div><span className="eyebrow">COMMAND OVERVIEW</span><h2>Situation</h2></div><button className="icon-button subtle" aria-label="More situation options"><MoreHorizontal size={18} /></button></div>
           <div className="readiness-card"><div className="readiness-top"><span className="eyebrow">GROUP READINESS</span><span className="readiness-grade">NOMINAL</span></div><div className="readiness-score"><strong>92</strong><span>%</span><div className="readiness-ring"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" /><circle className="progress" cx="22" cy="22" r="18" /></svg><Shield size={15} /></div></div><div className="readiness-foot"><span><i /> 3 of 3 units operational</span><span>+2.4%</span></div></div>
           <div className="objective-card">{state.objectives.map((objective) => <div key={objective.id}><div className="objective-heading"><span className="eyebrow">MISSION OBJECTIVE</span><span className={objective.completed ? 'objective-complete' : 'objective-progress'}>{objective.completed ? 'COMPLETE' : `${objective.progress}/${objective.required}`}</span></div><strong>{objective.title}</strong><p>{objective.description}</p><div className="objective-track"><i style={{ width: `${(objective.progress / objective.required) * 100}%` }} /></div></div>)}</div>
+          <div className="campaign-card"><div className="campaign-card-heading"><div><span className="eyebrow">ACTIVE CAMPAIGN</span><strong>{campaign?.progress.title ?? 'Northern Watch'}</strong></div><span className="campaign-count">{campaign?.progress.completedScenarios.length ?? 0}/{campaign?.progress.scenarioOrder.length ?? 1}</span></div><div className="campaign-save-state">{campaign?.progress.description ?? ''}</div><div className="campaign-save-state">{campaign?.hasSave ? 'Saved' : 'Unsaved progress'} <span>·</span> {savedAtLabel}</div><div className="campaign-actions"><button onClick={() => void saveCampaignNow()}><Save size={13} /> SAVE</button><button disabled={!campaign?.hasSave} onClick={() => void loadSavedCampaign()}><FolderOpen size={13} /> LOAD</button></div></div>
           <div className="intel-heading"><span className="eyebrow">CONTACT PICTURE</span><button className="icon-button subtle" aria-label="Filter contacts"><SlidersHorizontal size={14} /></button></div>
           <div className="contact-list">
             {state.contacts.map((contact) => <button key={contact.id} className={`intel-card ${selectedId === contact.id ? 'active' : ''}`} onClick={() => setSelectedId(contact.id)}>

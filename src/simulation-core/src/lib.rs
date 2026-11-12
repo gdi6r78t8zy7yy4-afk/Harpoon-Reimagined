@@ -1,9 +1,9 @@
 use harpoon_scenario_format::ScenarioDefinition;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const STARTER_SCENARIO: &str = include_str!("../../../scenarios/north-atlantic-intercept.json");
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Unit {
     pub id: String,
@@ -18,7 +18,7 @@ pub struct Unit {
     pub health: u8,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contact {
     pub id: String,
@@ -33,7 +33,7 @@ pub struct Contact {
     pub identified: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectiveProgress {
     pub id: String,
@@ -44,7 +44,7 @@ pub struct ObjectiveProgress {
     pub completed: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulationEvent {
     pub id: u64,
@@ -53,7 +53,7 @@ pub struct SimulationEvent {
     pub source: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulationState {
     pub scenario_id: String,
@@ -270,5 +270,49 @@ impl SimulationState {
         if self.events.len() > 12 {
             self.events.remove(0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SimulationState;
+
+    #[test]
+    fn movement_advances_time_and_moves_units_by_heading() {
+        let mut state = SimulationState::default();
+        let before = state.units[0].z;
+        let start_time = state.elapsed_seconds;
+
+        state.advance(60);
+
+        assert_eq!(state.tick, 1);
+        assert_eq!(state.elapsed_seconds, start_time + 60);
+        assert!(state.units[0].z < before);
+    }
+
+    #[test]
+    fn classifying_contacts_completes_objective_and_stops_simulation() {
+        let mut state = SimulationState::default();
+        state.running = true;
+
+        state.classify_contact("c-101", "hostile").unwrap();
+        assert!(!state.mission_complete);
+        assert_eq!(state.objectives[0].progress, 1);
+
+        state.classify_contact("c-102", "neutral").unwrap();
+        assert!(state.mission_complete);
+        assert!(!state.running);
+        assert!(state.objectives[0].completed);
+    }
+
+    #[test]
+    fn rejects_invalid_or_repeated_orders() {
+        let mut state = SimulationState::default();
+
+        assert!(state.issue_course("ddg-01", 360).is_err());
+        assert!(state.issue_speed("ddg-01", 51).is_err());
+        assert!(state.classify_contact("missing", "hostile").is_err());
+        state.classify_contact("c-101", "hostile").unwrap();
+        assert!(state.classify_contact("c-101", "hostile").is_err());
     }
 }

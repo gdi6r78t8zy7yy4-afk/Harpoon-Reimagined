@@ -173,3 +173,93 @@ fn valid_position(position: &Position) -> bool {
         && position.x.abs() <= 50.0
         && position.z.abs() <= 50.0
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampaignDefinition {
+    pub schema_version: u16,
+    pub campaign_id: String,
+    pub title: String,
+    pub description: String,
+    pub scenarios: Vec<String>,
+}
+
+impl CampaignDefinition {
+    pub fn parse(json: &str) -> Result<Self, ScenarioError> {
+        let campaign: Self = serde_json::from_str(json)
+            .map_err(|error| ScenarioError(format!("Invalid campaign JSON: {error}")))?;
+        campaign.validate()?;
+        Ok(campaign)
+    }
+
+    pub fn validate(&self) -> Result<(), ScenarioError> {
+        if self.schema_version != 1 {
+            return Err(ScenarioError(
+                "Unsupported campaign schema version; expected version 1".into(),
+            ));
+        }
+        if self.campaign_id.trim().is_empty()
+            || self.title.trim().is_empty()
+            || self.description.trim().is_empty()
+        {
+            return Err(ScenarioError(
+                "Campaign id, title, and description must not be empty".into(),
+            ));
+        }
+        if self.scenarios.is_empty() || self.scenarios.len() > 32 {
+            return Err(ScenarioError(
+                "A campaign must contain between 1 and 32 scenarios".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        if self
+            .scenarios
+            .iter()
+            .any(|scenario_id| scenario_id.trim().is_empty() || !ids.insert(scenario_id.as_str()))
+        {
+            return Err(ScenarioError(
+                "Campaign scenario ids must be non-empty and unique".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CampaignDefinition, ScenarioDefinition};
+
+    const SCENARIO: &str = include_str!("../../../scenarios/north-atlantic-intercept.json");
+    const CAMPAIGN: &str = include_str!("../../../campaigns/northern-watch.json");
+
+    #[test]
+    fn parses_starter_scenario() {
+        let scenario = ScenarioDefinition::parse(SCENARIO).expect("starter scenario is valid");
+        assert_eq!(scenario.id, "north-atlantic-intercept");
+        assert_eq!(scenario.units.len(), 3);
+        assert_eq!(scenario.contacts.len(), 3);
+    }
+
+    #[test]
+    fn rejects_duplicate_unit_and_contact_ids() {
+        let duplicate_id = SCENARIO.replace("\"id\": \"c-101\"", "\"id\": \"ddg-01\"");
+        let error = ScenarioDefinition::parse(&duplicate_id).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("ids must be non-empty and unique"));
+    }
+
+    #[test]
+    fn parses_starter_campaign_and_rejects_duplicate_scenarios() {
+        let campaign = CampaignDefinition::parse(CAMPAIGN).expect("starter campaign is valid");
+        assert_eq!(campaign.campaign_id, "north-atlantic-patrol");
+        assert_eq!(campaign.scenarios, ["north-atlantic-intercept"]);
+
+        let duplicate = CAMPAIGN.replace(
+            "\"scenarios\": [\"north-atlantic-intercept\"]",
+            "\"scenarios\": [\"north-atlantic-intercept\", \"north-atlantic-intercept\"]",
+        );
+        let error = CampaignDefinition::parse(&duplicate).unwrap_err();
+        assert!(error.to_string().contains("must be non-empty and unique"));
+    }
+}

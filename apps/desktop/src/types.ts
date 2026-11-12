@@ -53,3 +53,29 @@ export type SimulationState = {
   objectives: Objective[]
   events: SimulationEvent[]
 }
+
+export type CampaignProgress = {
+  campaignId: string
+  title: string
+  description: string
+  scenarioOrder: string[]
+  activeScenarioId: string
+  completedScenarios: string[]
+}
+
+export type CampaignSettings = {
+  timeScale: number
+  layersVisible: boolean
+}
+
+export type CampaignStatus = {
+  progress: CampaignProgress
+  settings: CampaignSettings
+  hasSave: boolean
+  savedAt: number | null
+}
+
+export type CampaignSession = {
+  simulation: SimulationState
+  status: CampaignStatus
+}

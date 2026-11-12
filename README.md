@@ -43,7 +43,7 @@ The first interactive desktop prototype loads a validated scenario, renders a Ba
 
 ## Status
 
-The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems, multiple authored scenarios, campaigns, and persistence are not implemented yet.
+The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems and multiple authored scenarios remain future work. The first campaign slice now tracks progression and local save/load.
 
 ## Contributing
 

@@ -22,7 +22,7 @@ Rust owns world state, entity behavior, sensors, weapons, and time advancement. 
 
 ### Scenario and campaign data
 
-Scenario definitions use versioned JSON, validated before a session starts. Campaign progression refers to scenarios and persists outcomes and player choices. SQLite is the initial local store for saves and settings; it is not the source of truth for an active simulation tick.
+Scenario definitions use versioned JSON, validated before a session starts. Campaign progression refers to scenarios and persists outcomes and player choices. SQLite is the local store for versioned campaign saves and settings; it is not the source of truth for an active simulation tick. The active campaign snapshot is serialized with its simulation state and paused when restored.
 
 ## Data flow
 

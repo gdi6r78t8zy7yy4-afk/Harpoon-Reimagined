@@ -25,10 +25,11 @@ Milestones are ordered to reduce technical risk. Scope is provisional and should
 - [ ] Complete a native macOS play-through and refine scenario pacing and feedback.
 - **Exit:** a complete short scenario can be loaded, played, and completed.
 
-## M3 — Saves and campaign slice
+## M3 — Saves and campaign slice (in progress)
 
-- Add SQLite-backed settings and save/load for a documented save schema.
-- Carry scenario outcomes into a short campaign progression.
+- [x] Add versioned SQLite-backed campaign save/load for the active simulation and interface settings; restores start paused.
+- [x] Define a versioned campaign with ordered scenarios and retain completed scenario progress.
+- [ ] Confirm native save/load across an application restart and refine the campaign flow.
 - **Exit:** a campaign can be resumed after closing the application.
 
 ## M4 — Simulation depth and content tools

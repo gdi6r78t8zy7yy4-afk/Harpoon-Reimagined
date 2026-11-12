@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import scenario from './data/north-atlantic-intercept.json'
-import type { Contact, SimulationState, Unit } from './types'
+import campaignDefinition from './data/northern-watch.json'
+import type { CampaignProgress, CampaignSession, CampaignSettings, CampaignStatus, Contact, SimulationState, Unit } from './types'
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -29,7 +30,40 @@ function createBrowserState(): SimulationState {
 }
 
 const desktop = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
-let browserState = createBrowserState()
+const saveKey = 'harpoon.campaign-save.v1'
+const defaultCampaign = (): CampaignProgress => ({
+  campaignId: campaignDefinition.campaignId,
+  title: campaignDefinition.title,
+  description: campaignDefinition.description,
+  scenarioOrder: campaignDefinition.scenarios,
+  activeScenarioId: campaignDefinition.scenarios[0] ?? scenario.id,
+  completedScenarios: [],
+})
+
+type BrowserSave = { saveVersion: number; savedAt: number; campaign: CampaignProgress; settings?: CampaignSettings; simulation: SimulationState }
+
+function readBrowserSave(): BrowserSave | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const saved = window.localStorage.getItem(saveKey)
+    if (!saved) return null
+    const decoded = JSON.parse(saved) as BrowserSave
+    return decoded.saveVersion === 1 ? decoded : null
+  } catch {
+    return null
+  }
+}
+
+const loadedBrowserSave = readBrowserSave()
+let browserState = loadedBrowserSave?.simulation ?? createBrowserState()
+browserState.running = false
+let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
+let browserSavedAt: number | null = loadedBrowserSave?.savedAt ?? null
+let browserSettings: CampaignSettings = loadedBrowserSave?.settings ?? { timeScale: 5, layersVisible: true }
+
+function browserStatus(): CampaignStatus {
+  return { progress: structuredClone(browserCampaign), settings: structuredClone(browserSettings), hasSave: browserSavedAt !== null, savedAt: browserSavedAt }
+}
 
 export async function loadState() {
   return desktop() ? invoke<SimulationState>('simulation_state') : structuredClone(browserState)
@@ -39,7 +73,32 @@ export async function loadScenario(scenarioId: string) {
   if (desktop()) return invoke<SimulationState>('load_scenario', { scenarioId })
   if (scenarioId !== scenario.id) throw new Error('Scenario not found')
   browserState = createBrowserState()
+  browserCampaign.activeScenarioId = scenarioId
   return structuredClone(browserState)
+}
+
+export async function campaignStatus() {
+  return desktop() ? invoke<CampaignStatus>('campaign_status') : browserStatus()
+}
+
+export async function saveCampaign(settings: CampaignSettings) {
+  if (desktop()) return invoke<CampaignStatus>('save_campaign', settings)
+  browserSettings = structuredClone(settings)
+  browserSavedAt = Date.now()
+  const save: BrowserSave = { saveVersion: 1, savedAt: browserSavedAt, campaign: browserCampaign, settings: browserSettings, simulation: { ...browserState, running: false } }
+  try { window.localStorage.setItem(saveKey, JSON.stringify(save)) } catch { throw new Error('Campaign save could not be written in this browser') }
+  return browserStatus()
+}
+
+export async function loadCampaign(): Promise<CampaignSession> {
+  if (desktop()) return invoke<CampaignSession>('load_campaign')
+  const save = readBrowserSave()
+  if (!save) throw new Error('No saved campaign was found')
+  browserState = { ...save.simulation, running: false }
+  browserCampaign = save.campaign
+  browserSettings = save.settings ?? { timeScale: 5, layersVisible: true }
+  browserSavedAt = save.savedAt
+  return { simulation: structuredClone(browserState), status: browserStatus() }
 }
 
 export async function setRunning(running: boolean) {
@@ -105,6 +164,7 @@ export async function classifyContact(contactId: string, identity: 'hostile' | '
   if (browserState.objectives.every((objective) => objective.completed)) {
     browserState.missionComplete = true
     browserState.running = false
+    if (!browserCampaign.completedScenarios.includes(browserState.scenarioId)) browserCampaign.completedScenarios.push(browserState.scenarioId)
     addEvent('Mission complete: contact picture established', 'MISSION CONTROL')
   }
   return structuredClone(browserState)

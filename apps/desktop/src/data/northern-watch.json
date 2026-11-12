@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "north-atlantic-patrol",
+  "title": "Northern Watch",
+  "description": "A northern task group investigates a developing contact picture across the GIUK Gap.",
+  "scenarios": ["north-atlantic-intercept"]
+}

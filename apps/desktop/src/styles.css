@@ -155,3 +155,15 @@ h1,h2 { margin: 5px 0 0; font: 600 19px Manrope, sans-serif; color: #e0e9e5; let
 .mission-complete-banner > button { border: 1px solid rgba(123,211,183,.25); border-radius: 4px; background: rgba(86,159,128,.14); color: #a9ddc1; padding: 7px 8px; font: 7px var(--mono); letter-spacing: .04em; white-space: nowrap; }
 .mission-complete-banner > button:hover { background: rgba(86,159,128,.25); }
 .order-actions button:disabled,.order-picker button:disabled,.speed-control button:disabled,.step-button:disabled { opacity: .42; cursor: default; }
+.campaign-card { margin: -7px 0 15px; padding: 10px 11px; border: 1px solid rgba(121,159,150,.14); border-radius: 5px; background: rgba(255,255,255,.018); }
+.campaign-card-heading { display: flex; align-items: center; justify-content: space-between; }
+.campaign-card-heading > div { display: flex; flex-direction: column; gap: 5px; }
+.campaign-card-heading .eyebrow { font-size: 7px; }
+.campaign-card-heading strong { font-size: 9px; color: #c6d5ce; font-weight: 600; }
+.campaign-count { color: #89c8a8; font: 9px var(--mono); }
+.campaign-save-state { margin-top: 7px; color: #718480; font: 7px var(--mono); }
+.campaign-save-state span { color: #425b56; padding: 0 3px; }
+.campaign-actions { display: flex; gap: 6px; margin-top: 9px; }
+.campaign-actions button { display: flex; justify-content: center; align-items: center; gap: 5px; flex: 1; padding: 6px; border: 1px solid rgba(139,184,165,.15); border-radius: 4px; background: rgba(74,131,106,.08); color: #9ac6ae; font: 7px var(--mono); letter-spacing: .05em; }
+.campaign-actions button:hover:not(:disabled) { border-color: rgba(123,211,183,.45); background: rgba(74,131,106,.18); }
+.campaign-actions button:disabled { opacity: .4; cursor: default; }
