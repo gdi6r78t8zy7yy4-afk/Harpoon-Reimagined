@@ -46,7 +46,24 @@ pub struct Contact {
     pub bearing_uncertainty_at_last_report: f32,
     #[serde(default)]
     pub report_count: u32,
+    #[serde(default)]
+    pub report_history: Vec<TrackReport>,
+    #[serde(default)]
+    pub correlated_contact_ids: Vec<String>,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackReport {
+    pub elapsed_seconds: u64,
+    pub unit_id: String,
+    pub unit_name: String,
+    pub sensor_id: String,
+    pub sensor_name: String,
+    pub sensor_kind: String,
+}
+
+const MAX_TRACK_REPORT_HISTORY: usize = 20;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +172,8 @@ impl SimulationState {
                 range_uncertainty_at_last_report: initial_range_uncertainty(contact.confidence),
                 bearing_uncertainty_at_last_report: initial_bearing_uncertainty(contact.confidence),
                 report_count: 1,
+                report_history: Vec::new(),
+                correlated_contact_ids: Vec::new(),
             })
             .collect();
         let objectives = scenario
@@ -373,6 +392,17 @@ impl SimulationState {
             contact.range_uncertainty_at_last_report = contact.range_uncertainty_nm;
             contact.bearing_uncertainty_at_last_report = contact.bearing_uncertainty_deg;
             contact.report_count = contact.report_count.saturating_add(1);
+            contact.report_history.push(TrackReport {
+                elapsed_seconds: self.elapsed_seconds,
+                unit_id: unit_id.to_string(),
+                unit_name: unit_name.clone(),
+                sensor_id: sensor_id.to_string(),
+                sensor_name: sensor_name.clone(),
+                sensor_kind: sensor_kind.clone(),
+            });
+            if contact.report_history.len() > MAX_TRACK_REPORT_HISTORY {
+                contact.report_history.remove(0);
+            }
             reports += 1;
         }
 
@@ -383,6 +413,49 @@ impl SimulationState {
         };
         self.push_event(message, unit_name);
         Ok(reports)
+    }
+
+    pub fn correlate_contacts(
+        &mut self,
+        contact_id: &str,
+        other_contact_id: &str,
+        correlated: bool,
+    ) -> Result<(), String> {
+        if contact_id == other_contact_id {
+            return Err("A contact cannot be correlated with itself".into());
+        }
+        let contact_index = self
+            .contacts
+            .iter()
+            .position(|contact| contact.id == contact_id)
+            .ok_or_else(|| "Contact not found".to_string())?;
+        let other_index = self
+            .contacts
+            .iter()
+            .position(|contact| contact.id == other_contact_id)
+            .ok_or_else(|| "Contact not found".to_string())?;
+        let contact_label = self.contacts[contact_index].label.clone();
+        let other_label = self.contacts[other_index].label.clone();
+
+        for (index, peer_id) in [(contact_index, other_contact_id), (other_index, contact_id)] {
+            let peers = &mut self.contacts[index].correlated_contact_ids;
+            if correlated {
+                if !peers.iter().any(|id| id == peer_id) {
+                    peers.push(peer_id.to_string());
+                    peers.sort();
+                }
+            } else {
+                peers.retain(|id| id != peer_id);
+            }
+        }
+
+        let message = if correlated {
+            format!("Tracks correlated: {contact_label} / {other_label}")
+        } else {
+            format!("Tracks separated: {contact_label} / {other_label}")
+        };
+        self.push_event(message, "COMMAND".into());
+        Ok(())
     }
 
     pub fn classify_contact(&mut self, contact_id: &str, identity: &str) -> Result<(), String> {
@@ -510,6 +583,8 @@ mod tests {
         assert_eq!(state.contacts[0].confidence, original_confidence + 10);
         assert!(state.contacts[0].range_nm < 60.0);
         assert_eq!(state.contacts[2].confidence, 31);
+        assert_eq!(state.contacts[0].report_history.len(), 1);
+        assert_eq!(state.contacts[0].report_history[0].sensor_id, "spyd-1");
         assert!(state
             .events
             .last()
@@ -556,6 +631,34 @@ mod tests {
 
         assert!(bearing <= 1 || bearing >= 359);
         assert!(uncertainty < 10.0);
+    }
+
+    #[test]
+    fn contact_correlation_is_symmetric_and_can_be_removed() {
+        let mut state = SimulationState::default();
+        let first_id = state.contacts[0].id.clone();
+        let second_id = state.contacts[1].id.clone();
+
+        state
+            .correlate_contacts(&first_id, &second_id, true)
+            .unwrap();
+        assert_eq!(
+            state.contacts[0].correlated_contact_ids,
+            vec![second_id.clone()]
+        );
+        assert_eq!(
+            state.contacts[1].correlated_contact_ids,
+            vec![first_id.clone()]
+        );
+
+        state
+            .correlate_contacts(&first_id, &second_id, false)
+            .unwrap();
+        assert!(state.contacts[0].correlated_contact_ids.is_empty());
+        assert!(state.contacts[1].correlated_contact_ids.is_empty());
+        assert!(state
+            .correlate_contacts(&first_id, &first_id, true)
+            .is_err());
     }
 
     #[test]
@@ -616,6 +719,8 @@ mod tests {
             "rangeUncertaintyAtLastReport",
             "bearingUncertaintyAtLastReport",
             "reportCount",
+            "reportHistory",
+            "correlatedContactIds",
         ] {
             old_save.as_object_mut().unwrap().remove(field);
         }
@@ -624,6 +729,8 @@ mod tests {
         assert_eq!(restored.last_reported_seconds, 0);
         assert_eq!(restored.confidence_at_last_report, 0);
         assert_eq!(restored.report_count, 0);
+        assert!(restored.report_history.is_empty());
+        assert!(restored.correlated_contact_ids.is_empty());
     }
 
     #[test]

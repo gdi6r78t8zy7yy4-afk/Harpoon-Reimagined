@@ -8,7 +8,7 @@ declare global {
 }
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
-type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount'> & { position: { x: number; z: number } }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds'> & { position: { x: number; z: number } }
 
 const initialRangeUncertainty = (confidence: number) => 1 + (100 - confidence) * 0.12
 const initialBearingUncertainty = (confidence: number) => 2 + (100 - confidence) * 0.5
@@ -36,7 +36,7 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1 })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [] })),
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
       { id: 1, elapsedSeconds: scenario.startTimeSeconds, message: 'Unidentified surface contact detected', source: 'USS ARLEIGH BURKE' },
@@ -73,21 +73,26 @@ function readBrowserSave(): BrowserSave | null {
 const loadedBrowserSave = readBrowserSave()
 let browserState = loadedBrowserSave?.simulation ?? createBrowserState()
 browserState.running = false
-for (const contact of browserState.contacts) {
-  if (!Number.isFinite(contact.lastReportedSeconds) || contact.lastReportedSeconds === 0) {
-    contact.lastReportedSeconds = browserState.elapsedSeconds
-    contact.confidenceAtLastReport = contact.confidence
-  } else if (!Number.isFinite(contact.confidenceAtLastReport)) {
-    contact.confidenceAtLastReport = contact.confidence
-  }
-  if (!Number.isFinite(contact.reportCount) || contact.reportCount < 1) {
-    contact.rangeUncertaintyNm = initialRangeUncertainty(contact.confidence)
-    contact.bearingUncertaintyDeg = initialBearingUncertainty(contact.confidence)
-    contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
-    contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
-    contact.reportCount = 1
+function normalizeBrowserContacts(state: SimulationState) {
+  for (const contact of state.contacts) {
+    if (!Number.isFinite(contact.lastReportedSeconds) || contact.lastReportedSeconds === 0) {
+      contact.lastReportedSeconds = state.elapsedSeconds
+      contact.confidenceAtLastReport = contact.confidence
+    } else if (!Number.isFinite(contact.confidenceAtLastReport)) {
+      contact.confidenceAtLastReport = contact.confidence
+    }
+    if (!Number.isFinite(contact.reportCount) || contact.reportCount < 1) {
+      contact.rangeUncertaintyNm = initialRangeUncertainty(contact.confidence)
+      contact.bearingUncertaintyDeg = initialBearingUncertainty(contact.confidence)
+      contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
+      contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
+      contact.reportCount = 1
+    }
+    if (!Array.isArray(contact.reportHistory)) contact.reportHistory = []
+    if (!Array.isArray(contact.correlatedContactIds)) contact.correlatedContactIds = []
   }
 }
+normalizeBrowserContacts(browserState)
 let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
 let browserSavedAt: number | null = loadedBrowserSave?.savedAt ?? null
 let browserSettings: CampaignSettings = loadedBrowserSave?.settings ?? { timeScale: 5, layersVisible: true }
@@ -126,6 +131,7 @@ export async function loadCampaign(): Promise<CampaignSession> {
   const save = readBrowserSave()
   if (!save) throw new Error('No saved campaign was found')
   browserState = { ...save.simulation, running: false }
+  normalizeBrowserContacts(browserState)
   browserCampaign = save.campaign
   browserSettings = save.settings ?? { timeScale: 5, layersVisible: true }
   browserSavedAt = save.savedAt
@@ -226,6 +232,8 @@ export async function sensorSweep(unitId: string, sensorId: string) {
     contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
     contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
     contact.reportCount += 1
+    contact.reportHistory.push({ elapsedSeconds: browserState.elapsedSeconds, unitId, unitName: unit.name, sensorId, sensorName: sensor.name, sensorKind: sensor.kind })
+    contact.reportHistory = contact.reportHistory.slice(-20)
     reports += 1
   }
   addEvent(reports ? `${sensor.name} sweep complete: ${reports} contact report(s) updated` : `${sensor.name} sweep complete: no contacts updated`, unit.name)
@@ -258,6 +266,24 @@ export async function classifyContact(contactId: string, identity: 'hostile' | '
     if (!browserCampaign.completedScenarios.includes(browserState.scenarioId)) browserCampaign.completedScenarios.push(browserState.scenarioId)
     addEvent('Mission complete: contact picture established', 'MISSION CONTROL')
   }
+  return structuredClone(browserState)
+}
+
+export async function correlateContacts(contactId: string, otherContactId: string, correlated: boolean) {
+  if (desktop()) return invoke<SimulationState>('correlate_contacts', { contactId, otherContactId, correlated })
+  if (browserState.missionComplete) throw new Error('Scenario complete; reload it to manage contact correlation')
+  if (contactId === otherContactId) throw new Error('A contact cannot be correlated with itself')
+  const contact = browserState.contacts.find((item) => item.id === contactId)
+  const other = browserState.contacts.find((item) => item.id === otherContactId)
+  if (!contact || !other) throw new Error('Contact not found')
+  const updatePeer = (peer: Contact, peerId: string) => {
+    peer.correlatedContactIds = correlated
+      ? [...new Set([...peer.correlatedContactIds, peerId])].sort()
+      : peer.correlatedContactIds.filter((id) => id !== peerId)
+  }
+  updatePeer(contact, otherContactId)
+  updatePeer(other, contactId)
+  addEvent(`Tracks ${correlated ? 'correlated' : 'separated'}: ${contact.label} / ${other.label}`, 'COMMAND')
   return structuredClone(browserState)
 }
 

@@ -38,6 +38,17 @@ export type Contact = {
   rangeUncertaintyAtLastReport: number
   bearingUncertaintyAtLastReport: number
   reportCount: number
+  reportHistory: TrackReport[]
+  correlatedContactIds: string[]
+}
+
+export type TrackReport = {
+  elapsedSeconds: number
+  unitId: string
+  unitName: string
+  sensorId: string
+  sensorName: string
+  sensorKind: Sensor['kind']
 }
 
 export type Objective = {

@@ -6,7 +6,7 @@ import {
   Sparkles, Target, Waves, X, Save, FolderOpen,
 } from 'lucide-react'
 import { TacticalScene } from './components/TacticalScene'
-import { advance, campaignStatus, classifyContact, issueCourse, issueSpeed, loadCampaign, loadScenario, loadState, saveCampaign, sensorSweep, setRunning } from './simulation'
+import { advance, campaignStatus, classifyContact, correlateContacts, issueCourse, issueSpeed, loadCampaign, loadScenario, loadState, saveCampaign, sensorSweep, setRunning } from './simulation'
 import type { CampaignStatus, Contact, SimulationState, Unit } from './types'
 
 const timeLabel = (seconds: number) => {
@@ -203,6 +203,16 @@ function App() {
               {'side' in selected ? <Ship size={20} /> : <Target size={20} />}
             </div><div><strong>{'name' in selected ? selected.name : selected.label}</strong><span>{'className' in selected ? selected.className : selected.classification}</span></div></div>
             <div className="selected-stats"><div><span className="eyebrow">HEADING</span><strong>{'heading' in selected ? `${Math.round(selected.heading).toString().padStart(3, '0')}°` : `${selected.bearing.toString().padStart(3, '0')}°`}</strong></div><div><span className="eyebrow">SPEED</span><strong>{'speedKnots' in selected ? `${selected.speedKnots} <small>KT</small>` : `${selected.rangeNm.toFixed(1)} <small>NM</small>`}</strong></div><div><span className="eyebrow">STATUS</span><strong className="status-ready">{'status' in selected ? selected.status.toUpperCase() : `${selected.confidence}% CONF.`}</strong></div></div>
+            {'domain' in selected && <div className="track-management">
+              <div className="track-sources"><span className="eyebrow">RECENT SENSOR REPORTS</span>{selected.reportHistory.length ? selected.reportHistory.slice(-3).reverse().map((report) => <span key={`${report.elapsedSeconds}-${report.sensorId}-${report.unitId}`}>{timeLabel(report.elapsedSeconds)} · {report.sensorName} / {report.unitName}</span>) : <small>No sensor reports yet</small>}</div>
+              <div className="track-correlation"><span className="eyebrow">TRACK CORRELATION</span>
+                {selected.correlatedContactIds.map((peerId) => {
+                  const peer = state.contacts.find((contact) => contact.id === peerId)
+                  return peer && <button key={peer.id} disabled={state.missionComplete} onClick={() => void runStateAction(() => correlateContacts(selected.id, peer.id, false), `Separated ${peer.label}`)}>SEPARATE · {peer.label}</button>
+                })}
+                {state.contacts.filter((contact) => contact.id !== selected.id && !selected.correlatedContactIds.includes(contact.id)).map((peer) => <button key={peer.id} disabled={state.missionComplete} onClick={() => void runStateAction(() => correlateContacts(selected.id, peer.id, true), `Correlated ${peer.label}`)}>CORRELATE · {peer.label}</button>)}
+              </div>
+            </div>}
             {'health' in selected && <div className="health-row"><span>HULL INTEGRITY</span><div><i style={{ width: `${selected.health}%` }} /></div><strong>{selected.health}%</strong></div>}
             <div className="order-actions">{'speedKnots' in selected ? <><button disabled={state.missionComplete} onClick={() => setOrderPanel(orderPanel === 'course' ? null : 'course')}><LocateFixed size={14} /> COURSE</button><button disabled={state.missionComplete} onClick={() => setOrderPanel(orderPanel === 'speed' ? null : 'speed')}><Gauge size={14} /> SPEED</button><button disabled={state.missionComplete} onClick={() => setOrderPanel(orderPanel === 'sensors' ? null : 'sensors')}><Radio size={14} /> SENSORS</button></> : <><button disabled={selected.identified || state.missionComplete} onClick={() => void runStateAction(() => classifyContact(selected.id, 'hostile'), 'Contact classified as hostile')}><Target size={14} /> {selected.identified ? 'CLASSIFIED' : 'HOSTILE'}</button><button disabled={selected.identified || state.missionComplete} onClick={() => void runStateAction(() => classifyContact(selected.id, 'neutral'), 'Contact classified as neutral')}><Eye size={14} /> NEUTRAL</button></>}</div>
             {orderPanel === 'sensors' && 'speedKnots' in selected && <div className="order-picker"><span className="eyebrow">ONBOARD SENSORS</span><div className="sensor-picker">{selected.sensors.map((sensor) => <button key={sensor.id} disabled={state.missionComplete} onClick={() => void runStateAction(() => sensorSweep(selected.id, sensor.id), `${sensor.name} sweep complete`)}><strong>{sensor.name}</strong><small>{sensor.kind.toUpperCase()} · {sensor.rangeNm} NM · {sensor.domains.join(' / ').toUpperCase()}</small></button>)}</div></div>}
