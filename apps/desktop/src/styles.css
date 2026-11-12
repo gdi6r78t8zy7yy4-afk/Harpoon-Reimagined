@@ -148,6 +148,8 @@ h1,h2 { margin: 5px 0 0; font: 600 19px Manrope, sans-serif; color: #e0e9e5; let
 .order-picker .sensor-picker button { align-items: flex-start; flex-direction: column; gap: 3px; text-align: left; }
 .order-picker .sensor-picker strong { color: #b4cbc1; font: 7px var(--mono); }
 .order-picker .sensor-picker small { color: #718984; font: 6px var(--mono); }
+.track-age { color: #87b9a4; }
+.track-age.stale { color: #d19b72; }
 .event-dot.mint { background: #83d0ad; }
 
 .mission-complete-banner { position: absolute; z-index: 4; top: 18px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 32px)); display: flex; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid rgba(123,211,183,.32); border-radius: 6px; background: rgba(12,28,25,.94); box-shadow: 0 10px 35px rgba(0,0,0,.28); backdrop-filter: blur(12px); }

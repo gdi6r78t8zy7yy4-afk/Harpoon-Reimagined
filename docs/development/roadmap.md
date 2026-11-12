@@ -40,6 +40,12 @@ Milestones are ordered to reduce technical risk. Scope is provisional and should
 - Improve scenario authoring, validation, and 3D presentation.
 - **Exit:** content can be authored and reviewed with repeatable workflows.
 
+## M5 — Situational awareness (in progress)
+
+- [x] Age unrefreshed contact tracks, decay confidence, and mark stale tracks in the interface.
+- Improve report fusion, track uncertainty, identification, and contact management.
+- **Exit:** sensor reports form persistent, reviewable tracks with visible uncertainty.
+
 ## Ongoing quality
 
 Keep simulation behavior testable, preserve save compatibility intentionally, profile before optimizing, and document changes to foundational decisions.

@@ -8,7 +8,7 @@ declare global {
 }
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
-type ScenarioContact = Omit<Contact, 'x' | 'z'> & { position: { x: number; z: number } }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport'> & { position: { x: number; z: number } }
 
 function createBrowserState(): SimulationState {
   return {
@@ -20,7 +20,7 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence })),
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
       { id: 1, elapsedSeconds: scenario.startTimeSeconds, message: 'Unidentified surface contact detected', source: 'USS ARLEIGH BURKE' },
@@ -57,6 +57,14 @@ function readBrowserSave(): BrowserSave | null {
 const loadedBrowserSave = readBrowserSave()
 let browserState = loadedBrowserSave?.simulation ?? createBrowserState()
 browserState.running = false
+for (const contact of browserState.contacts) {
+  if (!Number.isFinite(contact.lastReportedSeconds) || contact.lastReportedSeconds === 0) {
+    contact.lastReportedSeconds = browserState.elapsedSeconds
+    contact.confidenceAtLastReport = contact.confidence
+  } else if (!Number.isFinite(contact.confidenceAtLastReport)) {
+    contact.confidenceAtLastReport = contact.confidence
+  }
+}
 let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
 let browserSavedAt: number | null = loadedBrowserSave?.savedAt ?? null
 let browserSettings: CampaignSettings = loadedBrowserSave?.settings ?? { timeScale: 5, layersVisible: true }
@@ -111,6 +119,7 @@ export async function setRunning(running: boolean) {
 export async function advance(seconds = 60) {
   if (desktop()) return invoke<SimulationState>('advance_simulation', { seconds })
   if (browserState.missionComplete) return structuredClone(browserState)
+  const previousElapsedSeconds = browserState.elapsedSeconds
   const safeSeconds = Math.max(1, Math.min(seconds, 3600))
   browserState.tick += 1
   browserState.elapsedSeconds += safeSeconds
@@ -119,6 +128,17 @@ export async function advance(seconds = 60) {
     const distance = unit.speedKnots * safeSeconds / 3600
     unit.x += Math.sin(radians) * distance
     unit.z -= Math.cos(radians) * distance
+  }
+  for (const contact of browserState.contacts) {
+    if (contact.identified) continue
+    if (contact.lastReportedSeconds === 0) {
+      contact.lastReportedSeconds = previousElapsedSeconds
+      contact.confidenceAtLastReport = contact.confidence
+    }
+    const previousAge = previousElapsedSeconds - contact.lastReportedSeconds
+    const trackAge = browserState.elapsedSeconds - contact.lastReportedSeconds
+    contact.confidence = Math.max(0, contact.confidenceAtLastReport - Math.floor(trackAge / 600) * 5)
+    if (previousAge < 1800 && trackAge >= 1800) addEvent(`Track is stale: ${contact.label}`, 'SENSORS')
   }
   return structuredClone(browserState)
 }
@@ -162,6 +182,8 @@ export async function sensorSweep(unitId: string, sensorId: string) {
     if (!capable) continue
     const confidenceGain = sensor.kind === 'radar' ? 10 : sensor.kind === 'sonar' ? 7 : 5
     contact.confidence = Math.min(99, contact.confidence + confidenceGain)
+    contact.lastReportedSeconds = browserState.elapsedSeconds
+    contact.confidenceAtLastReport = contact.confidence
     if (sensor.kind === 'radar') contact.rangeNm = distanceNm
     contact.bearing = ((Math.round(Math.atan2(dx, -dz) * 180 / Math.PI) % 360) + 360) % 360
     reports += 1
@@ -179,6 +201,8 @@ export async function classifyContact(contactId: string, identity: 'hostile' | '
   contact.label = `${identity.toUpperCase()} ${contact.domain.toUpperCase()}`
   contact.classification = identity === 'hostile' ? 'Hostile platform' : 'Neutral platform'
   contact.confidence = 100
+  contact.lastReportedSeconds = browserState.elapsedSeconds
+  contact.confidenceAtLastReport = 100
   contact.identified = true
   for (const objective of browserState.objectives) {
     const progress = browserState.contacts.filter((item) => item.identified).length

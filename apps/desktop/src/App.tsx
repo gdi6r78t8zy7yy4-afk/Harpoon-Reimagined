@@ -16,6 +16,15 @@ const timeLabel = (seconds: number) => {
   return `${hours}:${minutes}:${secs}`
 }
 
+const trackAgeSeconds = (contact: Contact, now: number) => Math.max(0, now - contact.lastReportedSeconds)
+const trackAgeLabel = (contact: Contact, now: number) => {
+  if (contact.identified) return 'IDENTIFIED'
+  const age = trackAgeSeconds(contact, now)
+  if (age < 600) return 'FRESH'
+  if (age < 1800) return `AGING · ${Math.floor(age / 60)}M`
+  return `STALE · ${Math.floor(age / 60)}M`
+}
+
 function App() {
   const [state, setState] = useState<SimulationState | null>(null)
   const [campaign, setCampaign] = useState<CampaignStatus | null>(null)
@@ -146,7 +155,7 @@ function App() {
             )) : state.contacts.map((contact) => (
               <button key={contact.id} onClick={() => setSelectedId(contact.id)} className={`unit-card contact-card ${selectedId === contact.id ? 'selected' : ''}`}>
                 <div className={`contact-symbol ${contact.domain}`}><Crosshair size={16} /></div>
-                <div className="unit-copy"><strong>{contact.label}</strong><span>{contact.classification}</span><small><i />{contact.confidence}% confidence · {contact.bearing.toString().padStart(3, '0')}°</small></div>
+                <div className="unit-copy"><strong>{contact.label}</strong><span>{contact.classification}</span><small><i />{contact.confidence}% confidence · {trackAgeLabel(contact, state.elapsedSeconds)}</small></div>
               </button>
             ))}
           </div>
@@ -184,7 +193,7 @@ function App() {
           <div className="intel-heading"><span className="eyebrow">CONTACT PICTURE</span><button className="icon-button subtle" aria-label="Filter contacts"><SlidersHorizontal size={14} /></button></div>
           <div className="contact-list">
             {state.contacts.map((contact) => <button key={contact.id} className={`intel-card ${selectedId === contact.id ? 'active' : ''}`} onClick={() => setSelectedId(contact.id)}>
-              <div className={`intel-glyph ${contact.domain}`}><Crosshair size={17} /></div><div className="intel-main"><div className="intel-title"><strong>{contact.label}</strong><span className={`confidence confidence-${contact.confidence > 60 ? 'high' : contact.confidence > 40 ? 'mid' : 'low'}`}>{contact.confidence}%</span></div><span className="intel-class">{contact.classification}</span><div className="intel-meta"><span>{contact.bearing.toString().padStart(3, '0')}° BRG</span><span>{contact.rangeNm.toFixed(1)} NM</span><span>{contact.domain.toUpperCase()}</span></div></div>
+              <div className={`intel-glyph ${contact.domain}`}><Crosshair size={17} /></div><div className="intel-main"><div className="intel-title"><strong>{contact.label}</strong><span className={`confidence confidence-${contact.confidence > 60 ? 'high' : contact.confidence > 40 ? 'mid' : 'low'}`}>{contact.confidence}%</span></div><span className="intel-class">{contact.classification}</span><div className="intel-meta"><span>{contact.bearing.toString().padStart(3, '0')}° BRG</span><span>{contact.rangeNm.toFixed(1)} NM</span><span>{contact.domain.toUpperCase()}</span><span className={`track-age ${trackAgeLabel(contact, state.elapsedSeconds).startsWith('STALE') ? 'stale' : ''}`}>{trackAgeLabel(contact, state.elapsedSeconds)}</span></div></div>
             </button>)}
           </div>
           <button className="all-contacts" onClick={() => setTab('sensors')}>VIEW ALL CONTACTS <ChevronRight size={14} /></button>

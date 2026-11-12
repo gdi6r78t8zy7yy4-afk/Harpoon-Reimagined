@@ -248,6 +248,7 @@ fn load_campaign(state: State<'_, AppState>) -> Result<CampaignSession, String> 
     };
     let mut simulation = save.simulation;
     simulation.running = false;
+    simulation.normalize_legacy_track_metadata();
     *state
         .simulation
         .lock()
@@ -419,6 +420,7 @@ pub fn run() {
                 .map(|saved| {
                     let mut simulation = saved.simulation.clone();
                     simulation.running = false;
+                    simulation.normalize_legacy_track_metadata();
                     simulation
                 })
                 .unwrap_or_default();

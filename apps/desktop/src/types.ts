@@ -31,6 +31,8 @@ export type Contact = {
   x: number
   z: number
   identified: boolean
+  lastReportedSeconds: number
+  confidenceAtLastReport: number
 }
 
 export type Objective = {

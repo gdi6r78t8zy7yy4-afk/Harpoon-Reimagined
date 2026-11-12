@@ -7,3 +7,6 @@ license = "UNLICENSED"
 [dependencies]
 harpoon-scenario-format = { path = "../scenario-format" }
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

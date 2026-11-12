@@ -32,6 +32,10 @@ pub struct Contact {
     pub x: f32,
     pub z: f32,
     pub identified: bool,
+    #[serde(default)]
+    pub last_reported_seconds: u64,
+    #[serde(default)]
+    pub confidence_at_last_report: u8,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -80,6 +84,7 @@ impl Default for SimulationState {
 impl SimulationState {
     pub fn from_scenario_json(json: &str) -> Result<Self, String> {
         let scenario = ScenarioDefinition::parse(json).map_err(|error| error.to_string())?;
+        let start_time_seconds = scenario.start_time_seconds;
         let units = scenario
             .units
             .into_iter()
@@ -111,6 +116,8 @@ impl SimulationState {
                 x: contact.position.x,
                 z: contact.position.z,
                 identified: contact.identified,
+                last_reported_seconds: start_time_seconds,
+                confidence_at_last_report: contact.confidence,
             })
             .collect();
         let objectives = scenario
@@ -131,7 +138,7 @@ impl SimulationState {
             mission_title: scenario.title,
             theatre: scenario.theatre,
             tick: 0,
-            elapsed_seconds: scenario.start_time_seconds,
+            elapsed_seconds: start_time_seconds,
             running: false,
             mission_complete: false,
             units,
@@ -140,13 +147,13 @@ impl SimulationState {
             events: vec![
                 SimulationEvent {
                     id: 1,
-                    elapsed_seconds: scenario.start_time_seconds,
+                    elapsed_seconds: start_time_seconds,
                     message: "Unidentified surface contact detected".into(),
                     source: "USS ARLEIGH BURKE".into(),
                 },
                 SimulationEvent {
                     id: 2,
-                    elapsed_seconds: scenario.start_time_seconds.saturating_sub(142),
+                    elapsed_seconds: start_time_seconds.saturating_sub(142),
                     message: "Transient acoustic signal reported".into(),
                     source: "USS SEAWOLF".into(),
                 },
@@ -154,10 +161,20 @@ impl SimulationState {
         })
     }
 
+    pub fn normalize_legacy_track_metadata(&mut self) {
+        for contact in &mut self.contacts {
+            if contact.last_reported_seconds == 0 {
+                contact.last_reported_seconds = self.elapsed_seconds;
+                contact.confidence_at_last_report = contact.confidence;
+            }
+        }
+    }
+
     pub fn advance(&mut self, seconds: u64) {
         if self.mission_complete {
             return;
         }
+        let previous_elapsed_seconds = self.elapsed_seconds;
         let seconds = seconds.clamp(1, 3600);
         self.tick += 1;
         self.elapsed_seconds += seconds;
@@ -168,6 +185,32 @@ impl SimulationState {
                 unit.x += radians.sin() * distance;
                 unit.z -= radians.cos() * distance;
             }
+        }
+        let mut stale_tracks = Vec::new();
+        for contact in &mut self.contacts {
+            if contact.identified {
+                continue;
+            }
+            // Saves created before track aging was added have no report timestamps.
+            if contact.last_reported_seconds == 0 {
+                contact.last_reported_seconds = previous_elapsed_seconds;
+                contact.confidence_at_last_report = contact.confidence;
+            }
+            let previous_age =
+                previous_elapsed_seconds.saturating_sub(contact.last_reported_seconds);
+            let track_age = self
+                .elapsed_seconds
+                .saturating_sub(contact.last_reported_seconds);
+            let decay_steps = track_age / 600;
+            contact.confidence = contact
+                .confidence_at_last_report
+                .saturating_sub(decay_steps.saturating_mul(5).min(u64::from(u8::MAX)) as u8);
+            if previous_age < 1800 && track_age >= 1800 {
+                stale_tracks.push(contact.label.clone());
+            }
+        }
+        for label in stale_tracks {
+            self.push_event(format!("Track is stale: {label}"), "SENSORS".into());
         }
     }
 
@@ -251,6 +294,8 @@ impl SimulationState {
                 _ => 0,
             };
             contact.confidence = contact.confidence.saturating_add(confidence_gain).min(99);
+            contact.last_reported_seconds = self.elapsed_seconds;
+            contact.confidence_at_last_report = contact.confidence;
             if sensor_kind == "radar" {
                 contact.range_nm = distance_nm;
             }
@@ -294,6 +339,8 @@ impl SimulationState {
             "Neutral platform".into()
         };
         contact.confidence = 100;
+        contact.last_reported_seconds = self.elapsed_seconds;
+        contact.confidence_at_last_report = 100;
         contact.identified = true;
         let report = contact.label.clone();
         self.update_objectives();
@@ -409,6 +456,80 @@ mod tests {
         assert_eq!(
             state.sensor_sweep("ddg-01", "bqq-2").unwrap_err(),
             "Sensor not found on this unit"
+        );
+    }
+
+    #[test]
+    fn unrefreshed_track_confidence_decays_and_a_new_report_restores_it() {
+        let mut state = SimulationState::default();
+
+        state.advance(600);
+        assert_eq!(state.contacts[0].confidence, 67);
+
+        state.sensor_sweep("ddg-01", "spyd-1").unwrap();
+        assert_eq!(state.contacts[0].confidence, 77);
+        state.advance(600);
+        assert_eq!(state.contacts[0].confidence, 72);
+    }
+
+    #[test]
+    fn tracks_emit_one_stale_event_when_they_cross_the_stale_threshold() {
+        let mut state = SimulationState::default();
+
+        state.advance(1800);
+
+        assert_eq!(
+            state
+                .events
+                .iter()
+                .filter(|event| event.message.starts_with("Track is stale:"))
+                .count(),
+            3
+        );
+        state.advance(60);
+        assert_eq!(
+            state
+                .events
+                .iter()
+                .filter(|event| event.message.starts_with("Track is stale:"))
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn older_contacts_deserialize_with_default_track_metadata() {
+        let contact = SimulationState::default().contacts.remove(0);
+        let mut old_save = serde_json::to_value(contact).unwrap();
+        old_save
+            .as_object_mut()
+            .unwrap()
+            .remove("lastReportedSeconds");
+        old_save
+            .as_object_mut()
+            .unwrap()
+            .remove("confidenceAtLastReport");
+
+        let restored: super::Contact = serde_json::from_value(old_save).unwrap();
+        assert_eq!(restored.last_reported_seconds, 0);
+        assert_eq!(restored.confidence_at_last_report, 0);
+    }
+
+    #[test]
+    fn legacy_track_metadata_normalizes_to_save_time() {
+        let mut state = SimulationState::default();
+        state.contacts[0].last_reported_seconds = 0;
+        state.contacts[0].confidence_at_last_report = 0;
+
+        state.normalize_legacy_track_metadata();
+
+        assert_eq!(
+            state.contacts[0].last_reported_seconds,
+            state.elapsed_seconds
+        );
+        assert_eq!(
+            state.contacts[0].confidence_at_last_report,
+            state.contacts[0].confidence
         );
     }
 }
