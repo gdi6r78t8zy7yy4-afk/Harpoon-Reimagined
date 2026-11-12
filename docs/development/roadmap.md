@@ -40,11 +40,14 @@ Milestones are ordered to reduce technical risk. Scope is provisional and should
 - Improve scenario authoring, validation, and 3D presentation.
 - **Exit:** content can be authored and reviewed with repeatable workflows.
 
-## M5 — Situational awareness (in progress)
+## M5 — Situational awareness (complete)
 
-- [x] Age unrefreshed contact tracks, decay confidence, and mark stale tracks in the interface.
-- Improve report fusion, track uncertainty, identification, and contact management.
+- [x] Keep sensor reports in persistent, reviewable contact tracks.
+- [x] Decay confidence on unrefreshed tracks and mark stale tracks in the interface.
+- [x] Preserve older saves by initializing missing track metadata when loaded.
 - **Exit:** sensor reports form persistent, reviewable tracks with visible uncertainty.
+
+Follow-up work can improve multi-sensor report fusion and provide richer uncertainty estimates and contact management.
 
 ## Ongoing quality
 
