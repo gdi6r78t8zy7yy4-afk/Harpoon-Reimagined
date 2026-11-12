@@ -8,7 +8,23 @@ declare global {
 }
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
-type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport'> & { position: { x: number; z: number } }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount'> & { position: { x: number; z: number } }
+
+const initialRangeUncertainty = (confidence: number) => 1 + (100 - confidence) * 0.12
+const initialBearingUncertainty = (confidence: number) => 2 + (100 - confidence) * 0.5
+
+function fuseBearing(prior: number, priorSigma: number, observed: number, observedSigma: number) {
+  const priorWeight = 1 / Math.max(0.1, priorSigma) ** 2
+  const observedWeight = 1 / Math.max(0.1, observedSigma) ** 2
+  const priorRadians = prior * Math.PI / 180
+  const observedRadians = observed * Math.PI / 180
+  const x = Math.cos(priorRadians) * priorWeight + Math.cos(observedRadians) * observedWeight
+  const y = Math.sin(priorRadians) * priorWeight + Math.sin(observedRadians) * observedWeight
+  return {
+    bearing: (Math.round(Math.atan2(y, x) * 180 / Math.PI) + 360) % 360,
+    uncertainty: Math.sqrt(1 / (priorWeight + observedWeight)),
+  }
+}
 
 function createBrowserState(): SimulationState {
   return {
@@ -20,7 +36,7 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1 })),
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
       { id: 1, elapsedSeconds: scenario.startTimeSeconds, message: 'Unidentified surface contact detected', source: 'USS ARLEIGH BURKE' },
@@ -63,6 +79,13 @@ for (const contact of browserState.contacts) {
     contact.confidenceAtLastReport = contact.confidence
   } else if (!Number.isFinite(contact.confidenceAtLastReport)) {
     contact.confidenceAtLastReport = contact.confidence
+  }
+  if (!Number.isFinite(contact.reportCount) || contact.reportCount < 1) {
+    contact.rangeUncertaintyNm = initialRangeUncertainty(contact.confidence)
+    contact.bearingUncertaintyDeg = initialBearingUncertainty(contact.confidence)
+    contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
+    contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
+    contact.reportCount = 1
   }
 }
 let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
@@ -138,6 +161,9 @@ export async function advance(seconds = 60) {
     const previousAge = previousElapsedSeconds - contact.lastReportedSeconds
     const trackAge = browserState.elapsedSeconds - contact.lastReportedSeconds
     contact.confidence = Math.max(0, contact.confidenceAtLastReport - Math.floor(trackAge / 600) * 5)
+    const ageSteps = Math.floor(trackAge / 600)
+    contact.rangeUncertaintyNm = Math.min(100, contact.rangeUncertaintyAtLastReport + ageSteps * 0.2)
+    contact.bearingUncertaintyDeg = Math.min(180, contact.bearingUncertaintyAtLastReport + ageSteps)
     if (previousAge < 1800 && trackAge >= 1800) addEvent(`Track is stale: ${contact.label}`, 'SENSORS')
   }
   return structuredClone(browserState)
@@ -181,11 +207,25 @@ export async function sensorSweep(unitId: string, sensorId: string) {
     const capable = sensor.domains.includes(contact.domain) && distanceNm <= sensor.rangeNm
     if (!capable) continue
     const confidenceGain = sensor.kind === 'radar' ? 10 : sensor.kind === 'sonar' ? 7 : 5
+    const observedBearing = ((Math.round(Math.atan2(dx, -dz) * 180 / Math.PI) % 360) + 360) % 360
+    const bearingSigma = sensor.kind === 'radar' ? 2 : sensor.kind === 'sonar' ? 6 : 10
+    const fusedBearing = fuseBearing(contact.bearing, contact.bearingUncertaintyDeg, observedBearing, bearingSigma)
+    contact.bearing = fusedBearing.bearing
+    contact.bearingUncertaintyDeg = fusedBearing.uncertainty
+    if (sensor.kind === 'radar') {
+      const priorVariance = Math.max(0.1, contact.rangeUncertaintyNm) ** 2
+      const observedVariance = 0.5 ** 2
+      const priorWeight = 1 / priorVariance
+      const observedWeight = 1 / observedVariance
+      contact.rangeNm = (contact.rangeNm * priorWeight + distanceNm * observedWeight) / (priorWeight + observedWeight)
+      contact.rangeUncertaintyNm = Math.sqrt(1 / (priorWeight + observedWeight))
+    }
     contact.confidence = Math.min(99, contact.confidence + confidenceGain)
     contact.lastReportedSeconds = browserState.elapsedSeconds
     contact.confidenceAtLastReport = contact.confidence
-    if (sensor.kind === 'radar') contact.rangeNm = distanceNm
-    contact.bearing = ((Math.round(Math.atan2(dx, -dz) * 180 / Math.PI) % 360) + 360) % 360
+    contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
+    contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
+    contact.reportCount += 1
     reports += 1
   }
   addEvent(reports ? `${sensor.name} sweep complete: ${reports} contact report(s) updated` : `${sensor.name} sweep complete: no contacts updated`, unit.name)
@@ -203,6 +243,8 @@ export async function classifyContact(contactId: string, identity: 'hostile' | '
   contact.confidence = 100
   contact.lastReportedSeconds = browserState.elapsedSeconds
   contact.confidenceAtLastReport = 100
+  contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
+  contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
   contact.identified = true
   for (const objective of browserState.objectives) {
     const progress = browserState.contacts.filter((item) => item.identified).length

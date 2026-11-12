@@ -49,6 +49,14 @@ Milestones are ordered to reduce technical risk. Scope is provisional and should
 
 Follow-up work can improve multi-sensor report fusion and provide richer uncertainty estimates and contact management.
 
+## M6 — Multi-sensor track fusion (in progress)
+
+- [x] Combine bearing reports with circular, confidence-weighted fusion.
+- [x] Fuse radar range estimates and retain an uncertainty estimate for range and bearing.
+- [x] Grow track uncertainty while reports age and display the estimate bounds and report count.
+- [ ] Add explicit contact source history and operator controls for track correlation.
+- **Exit:** reports from different sensor types improve the same saved track and expose how precise its position estimate is.
+
 ## Ongoing quality
 
 Keep simulation behavior testable, preserve save compatibility intentionally, profile before optimizing, and document changes to foundational decisions.

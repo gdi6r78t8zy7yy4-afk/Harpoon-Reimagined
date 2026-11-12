@@ -33,6 +33,11 @@ export type Contact = {
   identified: boolean
   lastReportedSeconds: number
   confidenceAtLastReport: number
+  rangeUncertaintyNm: number
+  bearingUncertaintyDeg: number
+  rangeUncertaintyAtLastReport: number
+  bearingUncertaintyAtLastReport: number
+  reportCount: number
 }
 
 export type Objective = {

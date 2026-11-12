@@ -36,6 +36,16 @@ pub struct Contact {
     pub last_reported_seconds: u64,
     #[serde(default)]
     pub confidence_at_last_report: u8,
+    #[serde(default)]
+    pub range_uncertainty_nm: f32,
+    #[serde(default)]
+    pub bearing_uncertainty_deg: f32,
+    #[serde(default)]
+    pub range_uncertainty_at_last_report: f32,
+    #[serde(default)]
+    pub bearing_uncertainty_at_last_report: f32,
+    #[serde(default)]
+    pub report_count: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -72,6 +82,28 @@ pub struct SimulationState {
     pub contacts: Vec<Contact>,
     pub objectives: Vec<ObjectiveProgress>,
     pub events: Vec<SimulationEvent>,
+}
+
+fn initial_range_uncertainty(confidence: u8) -> f32 {
+    1.0 + f32::from(100_u8.saturating_sub(confidence)) * 0.12
+}
+
+fn initial_bearing_uncertainty(confidence: u8) -> f32 {
+    2.0 + f32::from(100_u8.saturating_sub(confidence)) * 0.5
+}
+
+fn fuse_bearing(prior: u16, prior_sigma: f32, observed: u16, observed_sigma: f32) -> (u16, f32) {
+    let prior_sigma = prior_sigma.clamp(0.1, 180.0);
+    let observed_sigma = observed_sigma.clamp(0.1, 180.0);
+    let prior_weight = 1.0 / prior_sigma.powi(2);
+    let observed_weight = 1.0 / observed_sigma.powi(2);
+    let prior_radians = f32::from(prior).to_radians();
+    let observed_radians = f32::from(observed).to_radians();
+    let x = prior_radians.cos() * prior_weight + observed_radians.cos() * observed_weight;
+    let y = prior_radians.sin() * prior_weight + observed_radians.sin() * observed_weight;
+    let fused = y.atan2(x).to_degrees().rem_euclid(360.0).round() as u16 % 360;
+    let sigma = (1.0 / (prior_weight + observed_weight)).sqrt();
+    (fused, sigma)
 }
 
 impl Default for SimulationState {
@@ -118,6 +150,11 @@ impl SimulationState {
                 identified: contact.identified,
                 last_reported_seconds: start_time_seconds,
                 confidence_at_last_report: contact.confidence,
+                range_uncertainty_nm: initial_range_uncertainty(contact.confidence),
+                bearing_uncertainty_deg: initial_bearing_uncertainty(contact.confidence),
+                range_uncertainty_at_last_report: initial_range_uncertainty(contact.confidence),
+                bearing_uncertainty_at_last_report: initial_bearing_uncertainty(contact.confidence),
+                report_count: 1,
             })
             .collect();
         let objectives = scenario
@@ -167,6 +204,13 @@ impl SimulationState {
                 contact.last_reported_seconds = self.elapsed_seconds;
                 contact.confidence_at_last_report = contact.confidence;
             }
+            if contact.report_count == 0 {
+                contact.range_uncertainty_nm = initial_range_uncertainty(contact.confidence);
+                contact.bearing_uncertainty_deg = initial_bearing_uncertainty(contact.confidence);
+                contact.range_uncertainty_at_last_report = contact.range_uncertainty_nm;
+                contact.bearing_uncertainty_at_last_report = contact.bearing_uncertainty_deg;
+                contact.report_count = 1;
+            }
         }
     }
 
@@ -205,6 +249,10 @@ impl SimulationState {
             contact.confidence = contact
                 .confidence_at_last_report
                 .saturating_sub(decay_steps.saturating_mul(5).min(u64::from(u8::MAX)) as u8);
+            contact.range_uncertainty_nm =
+                (contact.range_uncertainty_at_last_report + decay_steps as f32 * 0.2).min(100.0);
+            contact.bearing_uncertainty_deg =
+                (contact.bearing_uncertainty_at_last_report + decay_steps as f32).min(180.0);
             if previous_age < 1800 && track_age >= 1800 {
                 stale_tracks.push(contact.label.clone());
             }
@@ -293,13 +341,38 @@ impl SimulationState {
                 "esm" => 5,
                 _ => 0,
             };
+            let observed_bearing =
+                (dx.atan2(-dz).to_degrees().rem_euclid(360.0).round() as u16) % 360;
+            let (bearing_sigma, range_sigma): (f32, Option<f32>) = match sensor_kind.as_str() {
+                "radar" => (2.0, Some(0.5)),
+                "sonar" => (6.0, None),
+                "esm" => (10.0, None),
+                _ => (30.0, None),
+            };
+            let (fused_bearing, fused_bearing_sigma) = fuse_bearing(
+                contact.bearing,
+                contact.bearing_uncertainty_deg,
+                observed_bearing,
+                bearing_sigma,
+            );
+            contact.bearing = fused_bearing;
+            contact.bearing_uncertainty_deg = fused_bearing_sigma;
+            if let Some(observed_range_sigma) = range_sigma {
+                let prior_variance = contact.range_uncertainty_nm.max(0.1).powi(2);
+                let observed_variance = observed_range_sigma.powi(2);
+                let prior_weight = 1.0 / prior_variance;
+                let observed_weight = 1.0 / observed_variance;
+                contact.range_nm = (contact.range_nm * prior_weight
+                    + distance_nm * observed_weight)
+                    / (prior_weight + observed_weight);
+                contact.range_uncertainty_nm = (1.0 / (prior_weight + observed_weight)).sqrt();
+            }
             contact.confidence = contact.confidence.saturating_add(confidence_gain).min(99);
             contact.last_reported_seconds = self.elapsed_seconds;
             contact.confidence_at_last_report = contact.confidence;
-            if sensor_kind == "radar" {
-                contact.range_nm = distance_nm;
-            }
-            contact.bearing = (dx.atan2(-dz).to_degrees().rem_euclid(360.0).round() as u16) % 360;
+            contact.range_uncertainty_at_last_report = contact.range_uncertainty_nm;
+            contact.bearing_uncertainty_at_last_report = contact.bearing_uncertainty_deg;
+            contact.report_count = contact.report_count.saturating_add(1);
             reports += 1;
         }
 
@@ -341,6 +414,8 @@ impl SimulationState {
         contact.confidence = 100;
         contact.last_reported_seconds = self.elapsed_seconds;
         contact.confidence_at_last_report = 100;
+        contact.range_uncertainty_at_last_report = contact.range_uncertainty_nm;
+        contact.bearing_uncertainty_at_last_report = contact.bearing_uncertainty_deg;
         contact.identified = true;
         let report = contact.label.clone();
         self.update_objectives();
@@ -447,12 +522,14 @@ mod tests {
     fn sonar_updates_bearing_but_keeps_the_existing_range_estimate() {
         let mut state = SimulationState::default();
         let old_range = state.contacts[2].range_nm;
-        let old_bearing = state.contacts[2].bearing;
+        let old_bearing_uncertainty = state.contacts[2].bearing_uncertainty_deg;
+        let old_report_count = state.contacts[2].report_count;
 
         assert_eq!(state.sensor_sweep("ssn-01", "bqq-2").unwrap(), 1);
         assert_eq!(state.contacts[2].confidence, 38);
         assert_eq!(state.contacts[2].range_nm, old_range);
-        assert_ne!(state.contacts[2].bearing, old_bearing);
+        assert!(state.contacts[2].bearing_uncertainty_deg < old_bearing_uncertainty);
+        assert_eq!(state.contacts[2].report_count, old_report_count + 1);
         assert_eq!(
             state.sensor_sweep("ddg-01", "bqq-2").unwrap_err(),
             "Sensor not found on this unit"
@@ -460,11 +537,35 @@ mod tests {
     }
 
     #[test]
+    fn radar_reports_fuse_range_and_reduce_position_uncertainty() {
+        let mut state = SimulationState::default();
+        let old_range_uncertainty = state.contacts[0].range_uncertainty_nm;
+        let old_bearing_uncertainty = state.contacts[0].bearing_uncertainty_deg;
+        let old_report_count = state.contacts[0].report_count;
+
+        state.sensor_sweep("ddg-01", "spyd-1").unwrap();
+
+        assert!(state.contacts[0].range_uncertainty_nm < old_range_uncertainty);
+        assert!(state.contacts[0].bearing_uncertainty_deg < old_bearing_uncertainty);
+        assert_eq!(state.contacts[0].report_count, old_report_count + 1);
+    }
+
+    #[test]
+    fn bearing_fusion_handles_reports_across_zero_degrees() {
+        let (bearing, uncertainty) = super::fuse_bearing(359, 10.0, 1, 10.0);
+
+        assert!(bearing <= 1 || bearing >= 359);
+        assert!(uncertainty < 10.0);
+    }
+
+    #[test]
     fn unrefreshed_track_confidence_decays_and_a_new_report_restores_it() {
         let mut state = SimulationState::default();
+        let initial_uncertainty = state.contacts[0].range_uncertainty_nm;
 
         state.advance(600);
         assert_eq!(state.contacts[0].confidence, 67);
+        assert!(state.contacts[0].range_uncertainty_nm > initial_uncertainty);
 
         state.sensor_sweep("ddg-01", "spyd-1").unwrap();
         assert_eq!(state.contacts[0].confidence, 77);
@@ -509,10 +610,20 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("confidenceAtLastReport");
+        for field in [
+            "rangeUncertaintyNm",
+            "bearingUncertaintyDeg",
+            "rangeUncertaintyAtLastReport",
+            "bearingUncertaintyAtLastReport",
+            "reportCount",
+        ] {
+            old_save.as_object_mut().unwrap().remove(field);
+        }
 
         let restored: super::Contact = serde_json::from_value(old_save).unwrap();
         assert_eq!(restored.last_reported_seconds, 0);
         assert_eq!(restored.confidence_at_last_report, 0);
+        assert_eq!(restored.report_count, 0);
     }
 
     #[test]
@@ -520,6 +631,7 @@ mod tests {
         let mut state = SimulationState::default();
         state.contacts[0].last_reported_seconds = 0;
         state.contacts[0].confidence_at_last_report = 0;
+        state.contacts[0].report_count = 0;
 
         state.normalize_legacy_track_metadata();
 
@@ -531,5 +643,7 @@ mod tests {
             state.contacts[0].confidence_at_last_report,
             state.contacts[0].confidence
         );
+        assert!(state.contacts[0].range_uncertainty_nm > 0.0);
+        assert_eq!(state.contacts[0].report_count, 1);
     }
 }

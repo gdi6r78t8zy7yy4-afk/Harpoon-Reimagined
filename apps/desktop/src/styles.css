@@ -173,3 +173,4 @@ h1,h2 { margin: 5px 0 0; font: 600 19px Manrope, sans-serif; color: #e0e9e5; let
 .campaign-actions button { display: flex; justify-content: center; align-items: center; gap: 5px; flex: 1; padding: 6px; border: 1px solid rgba(139,184,165,.15); border-radius: 4px; background: rgba(74,131,106,.08); color: #9ac6ae; font: 7px var(--mono); letter-spacing: .05em; }
 .campaign-actions button:hover:not(:disabled) { border-color: rgba(123,211,183,.45); background: rgba(74,131,106,.18); }
 .campaign-actions button:disabled { opacity: .4; cursor: default; }
+.intel-uncertainty { margin-top: 5px; color: #91a49d; font: 7px var(--mono); letter-spacing: .02em; }
