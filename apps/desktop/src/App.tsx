@@ -6,7 +6,7 @@ import {
   Sparkles, Target, Waves, X,
 } from 'lucide-react'
 import { TacticalScene } from './components/TacticalScene'
-import { advance, loadState, setRunning } from './simulation'
+import { advance, classifyContact, issueCourse, issueSpeed, loadScenario, loadState, setRunning } from './simulation'
 import type { Contact, SimulationState, Unit } from './types'
 
 const timeLabel = (seconds: number) => {
@@ -23,6 +23,7 @@ function App() {
   const [scale, setScale] = useState(5)
   const [showLayers, setShowLayers] = useState(true)
   const [notice, setNotice] = useState('')
+  const [orderPanel, setOrderPanel] = useState<'course' | 'speed' | null>(null)
 
   useEffect(() => { void loadState().then(setState) }, [])
 
@@ -42,8 +43,25 @@ function App() {
     [state, selectedId],
   )
 
+  const runStateAction = async (action: () => Promise<SimulationState>, message: string) => {
+    try {
+      const next = await action()
+      setState(next)
+      setOrderPanel(null)
+      setNotice(message)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Order could not be completed')
+    }
+    window.setTimeout(() => setNotice(''), 2600)
+  }
+
+  const reloadScenario = async () => {
+    await runStateAction(() => loadScenario('north-atlantic-intercept'), 'Scenario reloaded')
+    setSelectedId('ddg-01')
+  }
+
   const toggleRun = async () => {
-    if (!state) return
+    if (!state || state.missionComplete) return
     const next = await setRunning(!state.running)
     setState(next)
     setNotice(next.running ? 'Simulation resumed' : 'Simulation paused')
@@ -52,11 +70,7 @@ function App() {
 
   const zoomMap = (factor: number) => window.dispatchEvent(new CustomEvent('harpoon:zoom', { detail: factor }))
 
-  const sendOrder = (order: string) => {
-    const subject = selected && 'name' in selected ? selected.name : selected?.label ?? 'Task group'
-    setNotice(`${order} order sent to ${subject}`)
-    window.setTimeout(() => setNotice(''), 2600)
-  }
+
 
   if (!state) return <div className="boot-screen"><div className="boot-mark"><Anchor size={22} /></div><span>INITIALIZING TACTICAL SYSTEMS</span><div className="boot-line" /></div>
 
@@ -69,7 +83,7 @@ function App() {
           <span className="build-tag">PRE-ALPHA</span>
         </div>
         <div className="top-divider" />
-        <button className="scenario-select"><span className="scenario-kicker">SCENARIO 01</span><span>North Atlantic intercept</span><ChevronDown size={14} /></button>
+        <button className="scenario-select" onClick={() => void reloadScenario()} title="Reload the starter scenario"><span className="scenario-kicker">SCENARIO 01</span><span>{state.missionTitle}</span><ChevronDown size={14} /></button>
         <div className="topbar-spacer" />
         <div className="connection"><span className="connection-dot" />SIMULATION ONLINE</div>
         <button className="icon-button top-icon" aria-label="Notifications"><Bell size={17} /><i /></button>
@@ -79,7 +93,7 @@ function App() {
       <main className="command-layout">
         <aside className="left-rail panel">
           <div className="panel-heading"><div><span className="eyebrow">OPERATIONS</span><h1>Command</h1></div><button className="icon-button subtle" aria-label="Collapse menu"><Menu size={17} /></button></div>
-          <div className="theatre-card"><div className="theatre-glyph"><Globe2 size={18} /></div><div><span className="eyebrow">AREA OF OPERATIONS</span><strong>GIUK Gap</strong><small>North Atlantic · 64° 12′ N</small></div><ChevronRight size={15} className="muted-icon" /></div>
+          <div className="theatre-card"><div className="theatre-glyph"><Globe2 size={18} /></div><div><span className="eyebrow">AREA OF OPERATIONS</span><strong>{state.theatre}</strong><small>North Atlantic · 64° 12′ N</small></div><ChevronRight size={15} className="muted-icon" /></div>
           <div className="section-row"><span className="eyebrow">TASK GROUP</span><button className="text-button" onClick={() => { setNotice('Force composition is defined by the scenario'); window.setTimeout(() => setNotice(''), 2400) }}><Plus size={13} /> ADD UNIT</button></div>
           <div className="tab-switch"><button className={tab === 'forces' ? 'active' : ''} onClick={() => setTab('forces')}><Ship size={14} /> Forces <span>03</span></button><button className={tab === 'sensors' ? 'active' : ''} onClick={() => setTab('sensors')}><Radio size={14} /> Sensors <span>03</span></button></div>
           <div className="unit-list">
@@ -104,6 +118,7 @@ function App() {
         <section className="mission-stage">
           <div className="stage-toolbar"><div className="stage-title"><span className="live-indicator" /><span>TACTICAL PICTURE</span><span className="stage-separator">/</span><span className="stage-muted">NORTH ATLANTIC</span></div><div className="toolbar-actions"><button className="toolbar-button" onClick={() => setTab('sensors')}><Search size={15} /><span>Find</span><kbd>⌘ K</kbd></button><button className="toolbar-button" onClick={() => setShowLayers(!showLayers)}><Layers3 size={15} /><span>Layers</span></button><button className="square-button" aria-label="Expand view"><Maximize2 size={15} /></button></div></div>
           <div className="scene-wrap">
+            {state.missionComplete && <div className="mission-complete-banner"><div className="complete-mark"><Shield size={17} /></div><div><span className="eyebrow">SCENARIO COMPLETE</span><strong>Contact picture established</strong><small>Task Group North classified the required contacts.</small></div><button onClick={() => void reloadScenario()}>REPLAY SCENARIO</button></div>}
             <TacticalScene units={state.units} contacts={state.contacts} selectedId={selectedId} onSelect={setSelectedId} />
             <div className="map-vignette" />
             <div className="map-coordinates top-left"><span>64° 12′ 08″ N</span><span>002° 41′ 33″ W</span></div>
@@ -118,12 +133,13 @@ function App() {
             <div className="scene-caption"><span className="caption-dot" /> LIVE SIMULATION <span>·</span> {state.units.length} FRIENDLY UNITS <span>·</span> {state.contacts.length} CONTACTS</div>
           </div>
           <div className="timeline-bar"><div className="timeline-label"><span className="eyebrow">MISSION TIME</span><strong>{timeLabel(state.elapsedSeconds)}</strong><span className="utc-tag">ZULU</span></div><div className="timeline-track"><div className="timeline-tick active"/><div className="timeline-tick"/><div className="timeline-tick"/><div className="timeline-tick"/><div className="timeline-tick"/><div className="track-line"><i style={{ width: `${Math.min(16 + state.tick * 2, 74)}%` }} /></div><div className="track-labels"><span>START</span><span>PHASE 01</span><span>ENGAGEMENT WINDOW</span><span>+06:00 HRS</span></div></div><button className="timeline-expand"><ChevronDown size={15} /></button></div>
-          <div className="event-strip"><div className="event-label"><Activity size={14} /><span>ACTIVITY</span></div><div className="event-item"><span className="event-time">04:18:22</span><i className="event-dot amber" /><span>Unidentified surface contact detected</span><span className="event-source">USS ARLEIGH BURKE</span></div><div className="event-item"><span className="event-time">04:16:08</span><i className="event-dot violet" /><span>Transient acoustic signal reported</span><span className="event-source">USS SEAWOLF</span></div><button className="event-more"><ChevronRight size={15} /></button></div>
+          <div className="event-strip"><div className="event-label"><Activity size={14} /><span>ACTIVITY</span></div>{[...state.events].slice(-2).reverse().map((event) => <div className="event-item" key={event.id}><span className="event-time">{timeLabel(event.elapsedSeconds)}</span><i className={`event-dot ${event.message.startsWith('Contact classified') ? 'mint' : event.source === 'USS SEAWOLF' ? 'violet' : 'amber'}`} /><span>{event.message}</span><span className="event-source">{event.source}</span></div>)}<button className="event-more" aria-label="More activity"><ChevronRight size={15} /></button></div>
         </section>
 
         <aside className="right-rail panel">
           <div className="right-heading"><div><span className="eyebrow">COMMAND OVERVIEW</span><h2>Situation</h2></div><button className="icon-button subtle" aria-label="More situation options"><MoreHorizontal size={18} /></button></div>
           <div className="readiness-card"><div className="readiness-top"><span className="eyebrow">GROUP READINESS</span><span className="readiness-grade">NOMINAL</span></div><div className="readiness-score"><strong>92</strong><span>%</span><div className="readiness-ring"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" /><circle className="progress" cx="22" cy="22" r="18" /></svg><Shield size={15} /></div></div><div className="readiness-foot"><span><i /> 3 of 3 units operational</span><span>+2.4%</span></div></div>
+          <div className="objective-card">{state.objectives.map((objective) => <div key={objective.id}><div className="objective-heading"><span className="eyebrow">MISSION OBJECTIVE</span><span className={objective.completed ? 'objective-complete' : 'objective-progress'}>{objective.completed ? 'COMPLETE' : `${objective.progress}/${objective.required}`}</span></div><strong>{objective.title}</strong><p>{objective.description}</p><div className="objective-track"><i style={{ width: `${(objective.progress / objective.required) * 100}%` }} /></div></div>)}</div>
           <div className="intel-heading"><span className="eyebrow">CONTACT PICTURE</span><button className="icon-button subtle" aria-label="Filter contacts"><SlidersHorizontal size={14} /></button></div>
           <div className="contact-list">
             {state.contacts.map((contact) => <button key={contact.id} className={`intel-card ${selectedId === contact.id ? 'active' : ''}`} onClick={() => setSelectedId(contact.id)}>
@@ -138,13 +154,14 @@ function App() {
             </div><div><strong>{'name' in selected ? selected.name : selected.label}</strong><span>{'className' in selected ? selected.className : selected.classification}</span></div></div>
             <div className="selected-stats"><div><span className="eyebrow">HEADING</span><strong>{'heading' in selected ? `${Math.round(selected.heading).toString().padStart(3, '0')}°` : `${selected.bearing.toString().padStart(3, '0')}°`}</strong></div><div><span className="eyebrow">SPEED</span><strong>{'speedKnots' in selected ? `${selected.speedKnots} <small>KT</small>` : `${selected.rangeNm.toFixed(1)} <small>NM</small>`}</strong></div><div><span className="eyebrow">STATUS</span><strong className="status-ready">{'status' in selected ? selected.status.toUpperCase() : `${selected.confidence}% CONF.`}</strong></div></div>
             {'health' in selected && <div className="health-row"><span>HULL INTEGRITY</span><div><i style={{ width: `${selected.health}%` }} /></div><strong>{selected.health}%</strong></div>}
-            <div className="order-actions"><button onClick={() => sendOrder('Course change')}><LocateFixed size={14} /> COURSE</button><button onClick={() => sendOrder('Sensor sweep')}><Eye size={14} /> SENSORS</button></div>
+            <div className="order-actions">{'speedKnots' in selected ? <><button disabled={state.missionComplete} onClick={() => setOrderPanel(orderPanel === 'course' ? null : 'course')}><LocateFixed size={14} /> COURSE</button><button disabled={state.missionComplete} onClick={() => setOrderPanel(orderPanel === 'speed' ? null : 'speed')}><Gauge size={14} /> SPEED</button></> : <><button disabled={selected.identified || state.missionComplete} onClick={() => void runStateAction(() => classifyContact(selected.id, 'hostile'), 'Contact classified as hostile')}><Target size={14} /> {selected.identified ? 'CLASSIFIED' : 'HOSTILE'}</button><button disabled={selected.identified || state.missionComplete} onClick={() => void runStateAction(() => classifyContact(selected.id, 'neutral'), 'Contact classified as neutral')}><Eye size={14} /> NEUTRAL</button></>}</div>
+            {orderPanel && 'speedKnots' in selected && <div className="order-picker"><span className="eyebrow">{orderPanel === 'course' ? 'SET COURSE' : 'SET SPEED'}</span><div>{orderPanel === 'course' ? [0, 45, 90, 135, 180, 225, 270, 315].map((heading) => <button key={heading} disabled={state.missionComplete} onClick={() => void runStateAction(() => issueCourse(selected.id, heading), `Course set to ${heading.toString().padStart(3, '0')}°`)}>{heading.toString().padStart(3, '0')}°</button>) : [0, 5, 10, 15, 20, 25].map((speed) => <button key={speed} disabled={state.missionComplete} onClick={() => void runStateAction(() => issueSpeed(selected.id, speed), `Speed set to ${speed} kt`)}>{speed} KT</button>)}</div></div>}
           </div> : <div className="empty-selection">Select a unit or contact to inspect.</div>}
           <div className="intel-note"><Sparkles size={14} /><span>All contacts are uncorrelated. Classification confidence updates as new reports arrive.</span></div>
         </aside>
       </main>
 
-      <footer className="sim-footer"><div className="footer-left"><span className="footer-status"><i /> SIMULATION {state.running ? 'RUNNING' : 'PAUSED'}</span><span className="footer-divider"/><span>BUILD 0.1.0 · PROTOTYPE</span></div><div className="sim-controls"><button className={`play-button ${state.running ? 'is-running' : ''}`} onClick={() => void toggleRun()}>{state.running ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}<span>{state.running ? 'PAUSE' : 'RESUME'}</span></button><div className="speed-control"><Gauge size={14} /><span>TIME SCALE</span>{[1, 5, 15, 30].map((value) => <button key={value} className={scale === value ? 'active' : ''} onClick={() => setScale(value)}>{value}×</button>)}</div><button className="step-button" onClick={() => void tick(60)} title="Advance one minute"><ChevronRight size={15} /><span>+1 MIN</span></button></div><div className="footer-right"><Waves size={14} /><span>SEA STATE 3</span><span className="footer-divider"/><span>WIND 12 KT NW</span><button className="help-button" aria-label="Help"><CircleHelp size={16} /></button></div></footer>
+      <footer className="sim-footer"><div className="footer-left"><span className="footer-status"><i /> SIMULATION {state.missionComplete ? 'COMPLETE' : state.running ? 'RUNNING' : 'PAUSED'}</span><span className="footer-divider"/><span>BUILD 0.1.0 · PROTOTYPE</span></div><div className="sim-controls"><button className={`play-button ${state.running ? 'is-running' : ''}`} onClick={() => void toggleRun()} disabled={state.missionComplete}>{state.running ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}<span>{state.missionComplete ? 'COMPLETE' : state.running ? 'PAUSE' : 'RESUME'}</span></button><div className="speed-control"><Gauge size={14} /><span>TIME SCALE</span>{[1, 5, 15, 30].map((value) => <button key={value} disabled={state.missionComplete} className={scale === value ? 'active' : ''} onClick={() => setScale(value)}>{value}×</button>)}</div><button className="step-button" disabled={state.missionComplete} onClick={() => void tick(60)} title="Advance one minute"><ChevronRight size={15} /><span>+1 MIN</span></button></div><div className="footer-right"><Waves size={14} /><span>SEA STATE 3</span><span className="footer-divider"/><span>WIND 12 KT NW</span><button className="help-button" aria-label="Help"><CircleHelp size={16} /></button></div></footer>
       {notice && <div className="toast"><span><i />{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss"><X size={14} /></button></div>}
     </div>
   )

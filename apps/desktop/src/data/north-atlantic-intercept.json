@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "north-atlantic-intercept",
+  "title": "North Atlantic intercept",
+  "theatre": "GIUK Gap",
+  "startTimeSeconds": 15510,
+  "units": [
+    {
+      "id": "ddg-01",
+      "name": "USS Arleigh Burke",
+      "className": "Flight III · DDG",
+      "side": "friendly",
+      "status": "Underway",
+      "position": { "x": -5, "z": 2 },
+      "heading": 42,
+      "speedKnots": 18,
+      "health": 100
+    },
+    {
+      "id": "ssn-01",
+      "name": "USS Seawolf",
+      "className": "Seawolf class · SSN",
+      "side": "friendly",
+      "status": "Silent running",
+      "position": { "x": -8, "z": -5 },
+      "heading": 68,
+      "speedKnots": 6,
+      "health": 100
+    },
+    {
+      "id": "ffg-01",
+      "name": "HNoMS Fridtjof Nansen",
+      "className": "Fridtjof Nansen · FFG",
+      "side": "friendly",
+      "status": "Screening",
+      "position": { "x": -1, "z": 5 },
+      "heading": 18,
+      "speedKnots": 14,
+      "health": 100
+    }
+  ],
+  "contacts": [
+    {
+      "id": "c-101",
+      "label": "UNKNOWN SURFACE",
+      "classification": "Surface contact",
+      "confidence": 72,
+      "bearing": 284,
+      "rangeNm": 38.4,
+      "domain": "surface",
+      "position": { "x": 5, "z": -1.5 },
+      "identified": false
+    },
+    {
+      "id": "c-102",
+      "label": "AIR CONTACT",
+      "classification": "Fast mover · probable",
+      "confidence": 46,
+      "bearing": 31,
+      "rangeNm": 62.1,
+      "domain": "air",
+      "position": { "x": 3, "z": -7 },
+      "identified": false
+    },
+    {
+      "id": "c-103",
+      "label": "SUBSURFACE",
+      "classification": "Transient acoustic",
+      "confidence": 31,
+      "bearing": 198,
+      "rangeNm": 17.8,
+      "domain": "subsurface",
+      "position": { "x": 1.5, "z": 7 },
+      "identified": false
+    }
+  ],
+  "objectives": [
+    {
+      "id": "classify-contacts",
+      "title": "Build the contact picture",
+      "description": "Classify two unknown contacts using your task group's sensor reports.",
+      "kind": "classify_contacts",
+      "required": 2
+    }
+  ]
+}

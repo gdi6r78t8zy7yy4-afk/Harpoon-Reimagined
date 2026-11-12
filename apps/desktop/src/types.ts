@@ -21,12 +21,35 @@ export type Contact = {
   domain: 'surface' | 'air' | 'subsurface'
   x: number
   z: number
+  identified: boolean
+}
+
+export type Objective = {
+  id: string
+  title: string
+  description: string
+  progress: number
+  required: number
+  completed: boolean
+}
+
+export type SimulationEvent = {
+  id: number
+  elapsedSeconds: number
+  message: string
+  source: string
 }
 
 export type SimulationState = {
+  scenarioId: string
+  missionTitle: string
+  theatre: string
   tick: number
   elapsedSeconds: number
   running: boolean
+  missionComplete: boolean
   units: Unit[]
   contacts: Contact[]
+  objectives: Objective[]
+  events: SimulationEvent[]
 }

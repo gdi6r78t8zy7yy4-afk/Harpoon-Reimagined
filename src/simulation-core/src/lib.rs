@@ -1,4 +1,7 @@
+use harpoon_scenario_format::ScenarioDefinition;
 use serde::Serialize;
+
+const STARTER_SCENARIO: &str = include_str!("../../../scenarios/north-atlantic-intercept.json");
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,103 +30,133 @@ pub struct Contact {
     pub domain: String,
     pub x: f32,
     pub z: f32,
+    pub identified: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveProgress {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub progress: u8,
+    pub required: u8,
+    pub completed: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimulationEvent {
+    pub id: u64,
+    pub elapsed_seconds: u64,
+    pub message: String,
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulationState {
+    pub scenario_id: String,
+    pub mission_title: String,
+    pub theatre: String,
     pub tick: u64,
     pub elapsed_seconds: u64,
     pub running: bool,
+    pub mission_complete: bool,
     pub units: Vec<Unit>,
     pub contacts: Vec<Contact>,
+    pub objectives: Vec<ObjectiveProgress>,
+    pub events: Vec<SimulationEvent>,
 }
 
 impl Default for SimulationState {
     fn default() -> Self {
-        Self {
-            tick: 0,
-            elapsed_seconds: 15_510,
-            running: false,
-            units: vec![
-                Unit {
-                    id: "ddg-01".into(),
-                    name: "USS Arleigh Burke".into(),
-                    class_name: "Flight III · DDG".into(),
-                    side: "friendly".into(),
-                    status: "Underway".into(),
-                    x: -5.0,
-                    z: 2.0,
-                    heading: 42.0,
-                    speed_knots: 18,
-                    health: 100,
-                },
-                Unit {
-                    id: "ssn-01".into(),
-                    name: "USS Seawolf".into(),
-                    class_name: "Seawolf class · SSN".into(),
-                    side: "friendly".into(),
-                    status: "Silent running".into(),
-                    x: -8.0,
-                    z: -5.0,
-                    heading: 68.0,
-                    speed_knots: 6,
-                    health: 100,
-                },
-                Unit {
-                    id: "ffg-01".into(),
-                    name: "HNoMS Fridtjof Nansen".into(),
-                    class_name: "Fridtjof Nansen · FFG".into(),
-                    side: "friendly".into(),
-                    status: "Screening".into(),
-                    x: -1.0,
-                    z: 5.0,
-                    heading: 18.0,
-                    speed_knots: 14,
-                    health: 100,
-                },
-            ],
-            contacts: vec![
-                Contact {
-                    id: "c-101".into(),
-                    label: "UNKNOWN SURFACE".into(),
-                    classification: "Surface contact".into(),
-                    confidence: 72,
-                    bearing: 284,
-                    range_nm: 38.4,
-                    domain: "surface".into(),
-                    x: 5.0,
-                    z: -1.5,
-                },
-                Contact {
-                    id: "c-102".into(),
-                    label: "AIR CONTACT".into(),
-                    classification: "Fast mover · probable".into(),
-                    confidence: 46,
-                    bearing: 031,
-                    range_nm: 62.1,
-                    domain: "air".into(),
-                    x: 3.0,
-                    z: -7.0,
-                },
-                Contact {
-                    id: "c-103".into(),
-                    label: "SUBSURFACE".into(),
-                    classification: "Transient acoustic".into(),
-                    confidence: 31,
-                    bearing: 198,
-                    range_nm: 17.8,
-                    domain: "subsurface".into(),
-                    x: 1.5,
-                    z: 7.0,
-                },
-            ],
-        }
+        Self::from_scenario_json(STARTER_SCENARIO)
+            .expect("the built-in North Atlantic scenario must be valid")
     }
 }
 
 impl SimulationState {
+    pub fn from_scenario_json(json: &str) -> Result<Self, String> {
+        let scenario = ScenarioDefinition::parse(json).map_err(|error| error.to_string())?;
+        let units = scenario
+            .units
+            .into_iter()
+            .map(|unit| Unit {
+                id: unit.id,
+                name: unit.name,
+                class_name: unit.class_name,
+                side: unit.side,
+                status: unit.status,
+                x: unit.position.x,
+                z: unit.position.z,
+                heading: unit.heading,
+                speed_knots: unit.speed_knots,
+                health: unit.health,
+            })
+            .collect();
+        let contacts = scenario
+            .contacts
+            .into_iter()
+            .map(|contact| Contact {
+                id: contact.id,
+                label: contact.label,
+                classification: contact.classification,
+                confidence: contact.confidence,
+                bearing: contact.bearing,
+                range_nm: contact.range_nm,
+                domain: contact.domain,
+                x: contact.position.x,
+                z: contact.position.z,
+                identified: contact.identified,
+            })
+            .collect();
+        let objectives = scenario
+            .objectives
+            .into_iter()
+            .map(|objective| ObjectiveProgress {
+                id: objective.id,
+                title: objective.title,
+                description: objective.description,
+                progress: 0,
+                required: objective.required,
+                completed: false,
+            })
+            .collect();
+
+        Ok(Self {
+            scenario_id: scenario.id,
+            mission_title: scenario.title,
+            theatre: scenario.theatre,
+            tick: 0,
+            elapsed_seconds: scenario.start_time_seconds,
+            running: false,
+            mission_complete: false,
+            units,
+            contacts,
+            objectives,
+            events: vec![
+                SimulationEvent {
+                    id: 1,
+                    elapsed_seconds: scenario.start_time_seconds,
+                    message: "Unidentified surface contact detected".into(),
+                    source: "USS ARLEIGH BURKE".into(),
+                },
+                SimulationEvent {
+                    id: 2,
+                    elapsed_seconds: scenario.start_time_seconds.saturating_sub(142),
+                    message: "Transient acoustic signal reported".into(),
+                    source: "USS SEAWOLF".into(),
+                },
+            ],
+        })
+    }
+
     pub fn advance(&mut self, seconds: u64) {
+        if self.mission_complete {
+            return;
+        }
+        let seconds = seconds.clamp(1, 3600);
         self.tick += 1;
         self.elapsed_seconds += seconds;
         for unit in &mut self.units {
@@ -133,6 +166,109 @@ impl SimulationState {
                 unit.x += radians.sin() * distance;
                 unit.z -= radians.cos() * distance;
             }
+        }
+    }
+
+    pub fn issue_course(&mut self, unit_id: &str, heading: u16) -> Result<(), String> {
+        if self.mission_complete {
+            return Err("The scenario is complete; reload it to issue new orders".into());
+        }
+        if heading > 359 {
+            return Err("Course must be between 000° and 359°".into());
+        }
+        let unit = self
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == unit_id)
+            .ok_or_else(|| "Unit not found".to_string())?;
+        unit.heading = f32::from(heading);
+        let name = unit.name.clone();
+        self.push_event(format!("New course set to {heading:03}°"), name);
+        Ok(())
+    }
+
+    pub fn issue_speed(&mut self, unit_id: &str, speed_knots: u8) -> Result<(), String> {
+        if self.mission_complete {
+            return Err("The scenario is complete; reload it to issue new orders".into());
+        }
+        if speed_knots > 50 {
+            return Err("Speed must be between 0 and 50 knots".into());
+        }
+        let unit = self
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == unit_id)
+            .ok_or_else(|| "Unit not found".to_string())?;
+        unit.speed_knots = speed_knots;
+        let name = unit.name.clone();
+        self.push_event(format!("Speed changed to {speed_knots} kt"), name);
+        Ok(())
+    }
+
+    pub fn classify_contact(&mut self, contact_id: &str, identity: &str) -> Result<(), String> {
+        if self.mission_complete {
+            return Err("The scenario is complete; reload it to classify more contacts".into());
+        }
+        if !matches!(identity, "hostile" | "neutral") {
+            return Err("Contact identity must be hostile or neutral".into());
+        }
+        let contact = self
+            .contacts
+            .iter_mut()
+            .find(|contact| contact.id == contact_id)
+            .ok_or_else(|| "Contact not found".to_string())?;
+        if contact.identified {
+            return Err("This contact has already been classified".into());
+        }
+        let label = if identity == "hostile" {
+            format!("HOSTILE {}", contact.domain.to_uppercase())
+        } else {
+            format!("NEUTRAL {}", contact.domain.to_uppercase())
+        };
+        contact.label = label;
+        contact.classification = if identity == "hostile" {
+            "Hostile platform".into()
+        } else {
+            "Neutral platform".into()
+        };
+        contact.confidence = 100;
+        contact.identified = true;
+        let report = contact.label.clone();
+        self.update_objectives();
+        self.push_event(format!("Contact classified: {report}"), "COMMAND".into());
+        if self.objectives.iter().all(|objective| objective.completed) {
+            self.mission_complete = true;
+            self.running = false;
+            self.push_event(
+                "Mission complete: contact picture established".into(),
+                "MISSION CONTROL".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn update_objectives(&mut self) {
+        let classified = self
+            .contacts
+            .iter()
+            .filter(|contact| contact.identified)
+            .count() as u8;
+        for objective in &mut self.objectives {
+            objective.progress = classified.min(objective.required);
+            objective.completed = objective.progress >= objective.required;
+        }
+    }
+
+    fn push_event(&mut self, message: String, source: String) {
+        let next_id = self.events.last().map_or(1, |event| event.id + 1);
+        self.events.push(SimulationEvent {
+            id: next_id,
+            elapsed_seconds: self.elapsed_seconds,
+            message,
+            source,
+        });
+        if self.events.len() > 12 {
+            self.events.remove(0);
         }
     }
 }

@@ -31,7 +31,7 @@ scripts/             Repeatable repository maintenance scripts
 .github/             Contribution templates and CI workflows
 ```
 
-A first interactive desktop prototype is in place. The frontend has a procedural Babylon.js tactical scene and controls; the Rust core owns simulation state. The app is not yet a complete game.
+The first interactive desktop prototype loads a validated scenario, renders a Babylon.js tactical scene, and connects player orders to the Rust simulation. The app is not yet a complete game.
 
 ## Development principles
 
@@ -43,7 +43,7 @@ A first interactive desktop prototype is in place. The frontend has a procedural
 
 ## Status
 
-The repository contains the project foundation and an early interactive desktop prototype. Core game systems, authored scenarios, campaigns, and persistence are not implemented yet.
+The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems, multiple authored scenarios, campaigns, and persistence are not implemented yet.
 
 ## Contributing
 

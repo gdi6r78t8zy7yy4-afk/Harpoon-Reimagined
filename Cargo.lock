@@ -1182,6 +1182,7 @@ dependencies = [
 name = "harpoon-desktop"
 version = "0.1.0"
 dependencies = [
+ "harpoon-scenario-format",
  "harpoon-simulation-core",
  "serde",
  "tauri",
@@ -1189,9 +1190,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "harpoon-scenario-format"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "harpoon-simulation-core"
 version = "0.1.0"
 dependencies = [
+ "harpoon-scenario-format",
  "serde",
 ]
 

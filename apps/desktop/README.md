@@ -26,4 +26,4 @@ npm run tauri dev
 
 ## Current slice
 
-The prototype displays a procedural 3D tactical map, a small friendly force and uncorrelated contacts, plus selection, simulation pause/resume, time scaling, and one-minute stepping. Rust owns the simulation snapshot and movement; browser preview uses a matching local mock. Orders, sensor behavior, campaign persistence, and authored scenarios remain future work.
+The prototype loads a versioned North Atlantic scenario, displays a procedural 3D tactical map and uncorrelated contacts, and supports selection, course/speed orders, contact classification, objective progress, a mission completion state with replay, pause/resume, time scaling, and one-minute stepping. Rust validates scenario data and owns simulation state; browser preview uses matching local scenario data. Campaign persistence, richer sensor behavior, weapons, and additional scenarios remain future work.

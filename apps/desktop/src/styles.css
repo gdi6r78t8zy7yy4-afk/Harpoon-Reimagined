@@ -128,3 +128,30 @@ h1,h2 { margin: 5px 0 0; font: 600 19px Manrope, sans-serif; color: #e0e9e5; let
 .speed-control { display: flex; align-items: center; gap: 5px; padding: 0 10px; height: 31px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); color: #849490; }.speed-control > span { font: 7px var(--mono); letter-spacing: .05em; margin: 0 3px; }.speed-control button { border: 0; border-radius: 3px; padding: 4px 5px; background: transparent; color: #70817d; font: 8px var(--mono); }.speed-control button.active { color: #a6d9c1; background: rgba(103,177,146,.14); }.step-button { display: flex; align-items: center; gap: 2px; background: transparent; border: 0; color: #849690; font: 8px var(--mono); }.step-button:hover { color: #cae0d4; }.footer-right svg { color: #7bada1; }.help-button { display: grid; place-items: center; margin-left: 7px; border: 0; background: transparent; color: #687a78; }.toast { position: fixed; z-index: 10; right: 340px; bottom: 68px; border: 1px solid rgba(123,211,183,.25); background: #14231f; border-radius: 5px; padding: 10px 12px; color: #b4d5c5; font-size: 10px; box-shadow: 0 9px 30px #03070988; display: flex; align-items: center; gap: 12px; }.toast span { display: flex; align-items: center; gap: 7px; }.toast i { width: 5px; height: 5px; background: var(--mint); border-radius: 50%; }.toast button { border: 0; background: transparent; color: #89a49a; padding: 0; }
 .boot-screen { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: #829993; background: #081014; font: 9px var(--mono); letter-spacing: .16em; }.boot-mark { color: #82d2b5; width: 48px; height: 48px; border: 1px solid #315b4d; border-radius: 10px; display: grid; place-items: center; background: #10201c; }.boot-line { height: 2px; width: 120px; background: linear-gradient(90deg, transparent, #80d4b3, transparent); animation: pulse 1.4s infinite; }@keyframes pulse { 50% { opacity: .35; transform: scaleX(.65); } }
 @media (max-width: 1240px) { .command-layout { grid-template-columns: 220px minmax(400px,1fr) 286px; }.left-rail { padding-left: 10px; padding-right: 10px; }.tab-switch { margin-left: -10px; margin-right: -10px; padding-left: 10px; padding-right: 10px; }.footer-left { font-size: 7px; }.footer-right { gap: 7px; font-size: 7px; }.speed-control { gap: 3px; padding: 0 6px; }.event-source { display: none; } }
+
+.objective-card { margin: -4px 0 17px; padding: 10px 11px; border: 1px solid rgba(123,211,183,.15); border-radius: 5px; background: linear-gradient(120deg, rgba(63,128,105,.09), rgba(255,255,255,.012)); }
+.objective-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+.objective-heading .eyebrow { font-size: 7px; }
+.objective-progress,.objective-complete { font: 8px var(--mono); color: #d3ad67; }
+.objective-complete { color: #81d0ac; }
+.objective-card > div > strong { color: #c6d7d0; font-size: 9px; font-weight: 600; }
+.objective-card p { color: #82938e; font-size: 8px; line-height: 1.5; margin: 5px 0 8px; }
+.objective-track { height: 3px; border-radius: 4px; background: #253835; overflow: hidden; }
+.objective-track i { display: block; height: 100%; background: #7bc9a7; transition: width .2s ease; }
+.order-actions button:disabled { opacity: .42; cursor: default; }
+.order-picker { border-top: 1px solid var(--line); margin-top: 9px; padding-top: 8px; }
+.order-picker .eyebrow { font-size: 7px; margin-bottom: 6px; }
+.order-picker > div { display: grid; grid-template-columns: repeat(4,1fr); gap: 4px; }
+.order-picker button { padding: 5px 2px; border: 1px solid rgba(139,184,165,.13); border-radius: 3px; background: rgba(255,255,255,.025); color: #9eb9ad; font: 7px var(--mono); }
+.order-picker button:hover { border-color: rgba(123,211,183,.4); background: rgba(74,131,106,.13); }
+.event-dot.mint { background: #83d0ad; }
+
+.mission-complete-banner { position: absolute; z-index: 4; top: 18px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 32px)); display: flex; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid rgba(123,211,183,.32); border-radius: 6px; background: rgba(12,28,25,.94); box-shadow: 0 10px 35px rgba(0,0,0,.28); backdrop-filter: blur(12px); }
+.complete-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 5px; background: rgba(123,211,183,.12); color: #91d9b8; flex: 0 0 30px; }
+.mission-complete-banner > div:nth-child(2) { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.mission-complete-banner .eyebrow { font-size: 7px; color: #83c8a8; }
+.mission-complete-banner strong { font-size: 10px; color: #d8e7de; }
+.mission-complete-banner small { font-size: 8px; color: #839b90; }
+.mission-complete-banner > button { border: 1px solid rgba(123,211,183,.25); border-radius: 4px; background: rgba(86,159,128,.14); color: #a9ddc1; padding: 7px 8px; font: 7px var(--mono); letter-spacing: .04em; white-space: nowrap; }
+.mission-complete-banner > button:hover { background: rgba(86,159,128,.25); }
+.order-actions button:disabled,.order-picker button:disabled,.speed-control button:disabled,.step-button:disabled { opacity: .42; cursor: default; }

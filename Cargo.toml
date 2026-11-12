@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "src/simulation-core",
+  "src/scenario-format",
   "apps/desktop/src-tauri",
 ]
-default-members = ["src/simulation-core", "apps/desktop/src-tauri"]
+default-members = ["src/simulation-core", "src/scenario-format", "apps/desktop/src-tauri"]

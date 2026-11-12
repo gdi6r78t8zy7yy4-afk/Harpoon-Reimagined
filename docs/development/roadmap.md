@@ -16,10 +16,13 @@ Milestones are ordered to reduce technical risk. Scope is provisional and should
 - [ ] Build and launch the native app on Apple Silicon macOS.
 - **Exit:** a native app opens a simple 3D scene and displays state produced by Rust.
 
-## M2 — First playable scenario
+## M2 — First playable scenario (in progress)
 
-- Define versioned scenario data and validation.
-- Add a small set of units, movement, contacts, basic player orders, pause, and time acceleration.
+- [x] Define versioned JSON scenario data with Rust validation.
+- [x] Load the North Atlantic starter scenario into the Rust simulation.
+- [x] Add unit movement, course and speed orders, contact classification, pause, and time acceleration.
+- [x] Track the first objective: classify two contacts, stop the simulation on completion, and offer replay.
+- [ ] Complete a native macOS play-through and refine scenario pacing and feedback.
 - **Exit:** a complete short scenario can be loaded, played, and completed.
 
 ## M3 — Saves and campaign slice

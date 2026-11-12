@@ -15,5 +15,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 harpoon-simulation-core = { path = "../../../src/simulation-core" }
+harpoon-scenario-format = { path = "../../../src/scenario-format" }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
