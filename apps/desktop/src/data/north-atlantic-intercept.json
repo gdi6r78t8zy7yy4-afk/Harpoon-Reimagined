@@ -14,7 +14,11 @@
       "position": { "x": -5, "z": 2 },
       "heading": 42,
       "speedKnots": 18,
-      "health": 100
+      "health": 100,
+      "sensors": [
+        { "id": "spyd-1", "name": "SPY-6 air search", "kind": "radar", "rangeNm": 120, "domains": ["surface", "air"] },
+        { "id": "sps-1", "name": "SPS-73 surface search", "kind": "radar", "rangeNm": 55, "domains": ["surface"] }
+      ]
     },
     {
       "id": "ssn-01",
@@ -25,7 +29,11 @@
       "position": { "x": -8, "z": -5 },
       "heading": 68,
       "speedKnots": 6,
-      "health": 100
+      "health": 100,
+      "sensors": [
+        { "id": "bqq-1", "name": "BQQ-10 passive sonar", "kind": "sonar", "rangeNm": 45, "domains": ["subsurface"] },
+        { "id": "bqq-2", "name": "BQQ-10 active sonar", "kind": "sonar", "rangeNm": 90, "domains": ["subsurface"] }
+      ]
     },
     {
       "id": "ffg-01",
@@ -36,7 +44,11 @@
       "position": { "x": -1, "z": 5 },
       "heading": 18,
       "speedKnots": 14,
-      "health": 100
+      "health": 100,
+      "sensors": [
+        { "id": "ap-1", "name": "APAR air search", "kind": "radar", "rangeNm": 95, "domains": ["surface", "air"] },
+        { "id": "hull-sonar", "name": "Hull sonar", "kind": "sonar", "rangeNm": 30, "domains": ["subsurface"] }
+      ]
     }
   ],
   "contacts": [

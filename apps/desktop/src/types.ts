@@ -9,6 +9,15 @@ export type Unit = {
   heading: number
   speedKnots: number
   health: number
+  sensors: Sensor[]
+}
+
+export type Sensor = {
+  id: string
+  name: string
+  kind: 'radar' | 'sonar' | 'esm'
+  rangeNm: number
+  domains: Array<'surface' | 'air' | 'subsurface'>
 }
 
 export type Contact = {

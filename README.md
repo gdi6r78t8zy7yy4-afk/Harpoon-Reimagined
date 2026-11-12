@@ -41,6 +41,10 @@ The first interactive desktop prototype loads a validated scenario, renders a Ba
 4. Validate and version external scenario and campaign data.
 5. Prefer small, reviewable changes with documented design decisions.
 
+## Validate scenario and campaign content
+
+Run `./scripts/validate-content.sh` to validate every JSON scenario and campaign before committing content changes. CI runs the same validation alongside the Rust checks.
+
 ## Status
 
 The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems and multiple authored scenarios remain future work. The first campaign slice now tracks progression and local save/load.

@@ -34,6 +34,8 @@ Milestones are ordered to reduce technical risk. Scope is provisional and should
 
 ## M4 — Simulation depth and content tools
 
+- [x] Add data-driven unit sensor profiles and deterministic sensor sweeps that refresh in-range contact tracks.
+- [x] Add a repeatable CLI workflow for validating scenario and campaign content.
 - Expand sensor, weapon, and domain behavior based on validated design priorities.
 - Improve scenario authoring, validation, and 3D presentation.
 - **Exit:** content can be authored and reviewed with repeatable workflows.

@@ -26,9 +26,11 @@ jobs:
       - run: npm run build
 
   rust:
-    name: Rust workspace check
+    name: Rust checks and content validation
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --workspace --locked
+      - run: cargo test --workspace --locked
+      - run: ./scripts/validate-content.sh

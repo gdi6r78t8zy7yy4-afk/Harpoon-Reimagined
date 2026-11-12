@@ -21,6 +21,18 @@ pub struct ScenarioUnit {
     pub heading: f32,
     pub speed_knots: u8,
     pub health: u8,
+    #[serde(default)]
+    pub sensors: Vec<SensorDefinition>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SensorDefinition {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub range_nm: f32,
+    pub domains: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -119,6 +131,27 @@ impl ScenarioDefinition {
             }
             if !valid_position(&unit.position) {
                 return invalid("Unit position must be finite and within 50 map units");
+            }
+            let mut sensor_ids = HashSet::new();
+            for sensor in &unit.sensors {
+                if sensor.id.trim().is_empty()
+                    || sensor.name.trim().is_empty()
+                    || !sensor_ids.insert(sensor.id.as_str())
+                {
+                    return invalid("Sensor ids and names must be non-empty and sensor ids unique");
+                }
+                if !matches!(sensor.kind.as_str(), "radar" | "sonar" | "esm")
+                    || !sensor.range_nm.is_finite()
+                    || sensor.range_nm <= 0.0
+                    || sensor.range_nm > 1000.0
+                    || sensor.domains.is_empty()
+                    || sensor
+                        .domains
+                        .iter()
+                        .any(|domain| !matches!(domain.as_str(), "surface" | "air" | "subsurface"))
+                {
+                    return invalid("Sensor kind, range, or domain is outside supported limits");
+                }
             }
         }
 
@@ -247,6 +280,13 @@ mod tests {
         assert!(error
             .to_string()
             .contains("ids must be non-empty and unique"));
+    }
+
+    #[test]
+    fn rejects_sensor_profiles_outside_supported_limits() {
+        let invalid_range = SCENARIO.replace("\"rangeNm\": 120", "\"rangeNm\": 0");
+        let error = ScenarioDefinition::parse(&invalid_range).unwrap_err();
+        assert!(error.to_string().contains("Sensor kind, range, or domain"));
     }
 
     #[test]

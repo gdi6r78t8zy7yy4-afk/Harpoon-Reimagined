@@ -1,4 +1,4 @@
-use harpoon_scenario_format::ScenarioDefinition;
+use harpoon_scenario_format::{ScenarioDefinition, SensorDefinition};
 use serde::{Deserialize, Serialize};
 
 const STARTER_SCENARIO: &str = include_str!("../../../scenarios/north-atlantic-intercept.json");
@@ -16,6 +16,7 @@ pub struct Unit {
     pub heading: f32,
     pub speed_knots: u8,
     pub health: u8,
+    pub sensors: Vec<SensorDefinition>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -93,6 +94,7 @@ impl SimulationState {
                 heading: unit.heading,
                 speed_knots: unit.speed_knots,
                 health: unit.health,
+                sensors: unit.sensors,
             })
             .collect();
         let contacts = scenario
@@ -205,6 +207,66 @@ impl SimulationState {
         Ok(())
     }
 
+    pub fn sensor_sweep(&mut self, unit_id: &str, sensor_id: &str) -> Result<usize, String> {
+        if self.mission_complete {
+            return Err("The scenario is complete; reload it to sweep sensors".into());
+        }
+        let unit = self
+            .units
+            .iter()
+            .find(|unit| unit.id == unit_id)
+            .ok_or_else(|| "Unit not found".to_string())?;
+        let unit_name = unit.name.clone();
+        let unit_x = unit.x;
+        let unit_z = unit.z;
+        let sensor = unit
+            .sensors
+            .iter()
+            .find(|sensor| sensor.id == sensor_id)
+            .ok_or_else(|| "Sensor not found on this unit".to_string())?;
+        let sensor_name = sensor.name.clone();
+        let sensor_kind = sensor.kind.clone();
+        let sensor_range = sensor.range_nm;
+        let sensor_domains = sensor.domains.clone();
+        let mut reports = 0;
+
+        for contact in &mut self.contacts {
+            if contact.identified {
+                continue;
+            }
+            let dx = contact.x - unit_x;
+            let dz = contact.z - unit_z;
+            let distance_nm = dx.hypot(dz) * 5.0;
+            if !sensor_domains
+                .iter()
+                .any(|domain| domain == &contact.domain)
+                || distance_nm > sensor_range
+            {
+                continue;
+            }
+            let confidence_gain = match sensor_kind.as_str() {
+                "radar" => 10,
+                "sonar" => 7,
+                "esm" => 5,
+                _ => 0,
+            };
+            contact.confidence = contact.confidence.saturating_add(confidence_gain).min(99);
+            if sensor_kind == "radar" {
+                contact.range_nm = distance_nm;
+            }
+            contact.bearing = (dx.atan2(-dz).to_degrees().rem_euclid(360.0).round() as u16) % 360;
+            reports += 1;
+        }
+
+        let message = if reports == 0 {
+            "Sensor sweep complete: no contacts updated".to_string()
+        } else {
+            format!("{sensor_name} sweep complete: {reports} contact report(s) updated")
+        };
+        self.push_event(message, unit_name);
+        Ok(reports)
+    }
+
     pub fn classify_contact(&mut self, contact_id: &str, identity: &str) -> Result<(), String> {
         if self.mission_complete {
             return Err("The scenario is complete; reload it to classify more contacts".into());
@@ -314,5 +376,39 @@ mod tests {
         assert!(state.classify_contact("missing", "hostile").is_err());
         state.classify_contact("c-101", "hostile").unwrap();
         assert!(state.classify_contact("c-101", "hostile").is_err());
+    }
+
+    #[test]
+    fn sensor_sweep_updates_only_contacts_within_range_and_sensor_domain() {
+        let mut state = SimulationState::default();
+        let original_confidence = state.contacts[0].confidence;
+        let reports = state.sensor_sweep("ddg-01", "spyd-1").unwrap();
+
+        assert_eq!(reports, 2);
+        assert_eq!(state.contacts[0].confidence, original_confidence + 10);
+        assert!(state.contacts[0].range_nm < 60.0);
+        assert_eq!(state.contacts[2].confidence, 31);
+        assert!(state
+            .events
+            .last()
+            .unwrap()
+            .message
+            .contains("2 contact report"));
+    }
+
+    #[test]
+    fn sonar_updates_bearing_but_keeps_the_existing_range_estimate() {
+        let mut state = SimulationState::default();
+        let old_range = state.contacts[2].range_nm;
+        let old_bearing = state.contacts[2].bearing;
+
+        assert_eq!(state.sensor_sweep("ssn-01", "bqq-2").unwrap(), 1);
+        assert_eq!(state.contacts[2].confidence, 38);
+        assert_eq!(state.contacts[2].range_nm, old_range);
+        assert_ne!(state.contacts[2].bearing, old_bearing);
+        assert_eq!(
+            state.sensor_sweep("ddg-01", "bqq-2").unwrap_err(),
+            "Sensor not found on this unit"
+        );
     }
 }

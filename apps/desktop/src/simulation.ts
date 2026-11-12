@@ -145,6 +145,31 @@ export async function issueSpeed(unitId: string, speedKnots: number) {
   return structuredClone(browserState)
 }
 
+export async function sensorSweep(unitId: string, sensorId: string) {
+  if (desktop()) return invoke<SimulationState>('sensor_sweep', { unitId, sensorId })
+  if (browserState.missionComplete) throw new Error('Scenario complete; reload it to sweep sensors')
+  const unit = browserState.units.find((item) => item.id === unitId)
+  if (!unit) throw new Error('Unit not found')
+  const sensor = unit.sensors.find((item) => item.id === sensorId)
+  if (!sensor) throw new Error('Sensor not found on this unit')
+  let reports = 0
+  for (const contact of browserState.contacts) {
+    if (contact.identified) continue
+    const dx = contact.x - unit.x
+    const dz = contact.z - unit.z
+    const distanceNm = Math.hypot(dx, dz) * 5
+    const capable = sensor.domains.includes(contact.domain) && distanceNm <= sensor.rangeNm
+    if (!capable) continue
+    const confidenceGain = sensor.kind === 'radar' ? 10 : sensor.kind === 'sonar' ? 7 : 5
+    contact.confidence = Math.min(99, contact.confidence + confidenceGain)
+    if (sensor.kind === 'radar') contact.rangeNm = distanceNm
+    contact.bearing = ((Math.round(Math.atan2(dx, -dz) * 180 / Math.PI) % 360) + 360) % 360
+    reports += 1
+  }
+  addEvent(reports ? `${sensor.name} sweep complete: ${reports} contact report(s) updated` : `${sensor.name} sweep complete: no contacts updated`, unit.name)
+  return structuredClone(browserState)
+}
+
 export async function classifyContact(contactId: string, identity: 'hostile' | 'neutral') {
   if (desktop()) return invoke<SimulationState>('classify_contact', { contactId, identity })
   if (browserState.missionComplete) throw new Error('Scenario complete; reload it to play again')
