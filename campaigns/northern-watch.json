@@ -3,5 +3,19 @@
   "campaignId": "north-atlantic-patrol",
   "title": "Northern Watch",
   "description": "A northern task group investigates a developing contact picture across the GIUK Gap.",
-  "scenarios": ["north-atlantic-intercept"]
+  "scenarios": ["north-atlantic-intercept"],
+  "consequences": [
+    {
+      "id": "isr-restricted",
+      "minEscalation": 1,
+      "title": "Allied ISR restricted",
+      "description": "Partner nations flag your electronic and counterspace strikes. Reconnaissance tasking across the GIUK Gap is rationed while diplomats protest."
+    },
+    {
+      "id": "roe-tightened",
+      "minEscalation": 3,
+      "title": "Rules of engagement tightened",
+      "description": "Blinding satellites and disabling networks in one campaign draws NATO council scrutiny. Future hard targets require higher command approval."
+    }
+  ]
 }

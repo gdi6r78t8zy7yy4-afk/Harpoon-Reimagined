@@ -1468,7 +1468,7 @@ mod tests {
                 .iter()
                 .filter(|event| event.message.starts_with("Track is stale:"))
                 .count(),
-            3
+            4
         );
         state.advance(60);
         assert_eq!(
@@ -1477,7 +1477,7 @@ mod tests {
                 .iter()
                 .filter(|event| event.message.starts_with("Track is stale:"))
                 .count(),
-            3
+            4
         );
     }
 
@@ -1537,6 +1537,17 @@ mod tests {
     fn state_with_satellite() -> SimulationState {
         let mut value: serde_json::Value =
             serde_json::from_str(super::STARTER_SCENARIO).unwrap();
+        // The starter scenario ships with its own satellite and ASAT loadout;
+        // these tests need deterministic pass windows, so start from a clean base.
+        value["contacts"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|contact| contact["domain"].as_str() != Some("space"));
+        for unit in value["units"].as_array_mut().unwrap() {
+            if let Some(weapons) = unit["weapons"].as_array_mut() {
+                weapons.retain(|weapon| weapon["kind"].as_str() != Some("asat"));
+            }
+        }
         value["contacts"]
             .as_array_mut()
             .unwrap()

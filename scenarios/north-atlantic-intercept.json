@@ -22,7 +22,8 @@
       "weapons": [
         { "id": "sm-6", "name": "SM-6", "kind": "missile", "rangeNm": 120, "domains": ["air"], "ammunition": 8, "hitChancePercent": 78, "speedKnots": 2000, "damagePercent": 80 },
         { "id": "harpoon", "name": "Harpoon", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 72, "speedKnots": 550, "damagePercent": 100 },
-        { "id": "cyber-disruptor", "name": "Cyber Disruptor", "kind": "cyber", "rangeNm": 120, "domains": ["surface", "air", "subsurface"], "ammunition": 2, "hitChancePercent": 78, "speedKnots": 5000, "damagePercent": 0, "effectDurationSeconds": 900 }
+        { "id": "cyber-disruptor", "name": "Cyber Disruptor", "kind": "cyber", "rangeNm": 120, "domains": ["surface", "air", "subsurface"], "ammunition": 2, "hitChancePercent": 78, "speedKnots": 5000, "damagePercent": 0, "effectDurationSeconds": 900 },
+        { "id": "sm-3-asat", "name": "SM-3 ERAM", "kind": "asat", "rangeNm": 900, "domains": ["space"], "ammunition": 4, "hitChancePercent": 70, "speedKnots": 4500, "damagePercent": 0, "effectDurationSeconds": 1800 }
       ]
     },
     {
@@ -99,6 +100,31 @@
       "position": { "x": 1.5, "z": 7 },
       "identified": false,
       "defenses": [{ "id": "acoustic-decoys", "name": "Acoustic decoys", "charges": 2, "interceptChancePercent": 25 }]
+    },
+    {
+      "id": "c-104",
+      "label": "ORBITAL TRACK",
+      "classification": "Reconnaissance orbit",
+      "confidence": 58,
+      "bearing": 313,
+      "rangeNm": 205.2,
+      "domain": "space",
+      "position": { "x": -30, "z": -28 },
+      "identified": false,
+      "groundTrack": { "heading": 85, "speedKnots": 75 },
+      "hardeningSeconds": 900,
+      "orbitalSensor": {
+        "id": "sar-swath",
+        "name": "SAR swath",
+        "rangeNm": 600,
+        "domains": ["surface", "air"],
+        "passes": [
+          { "startSeconds": 17400, "durationSeconds": 900 },
+          { "startSeconds": 21900, "durationSeconds": 900 },
+          { "startSeconds": 26400, "durationSeconds": 900 },
+          { "startSeconds": 30900, "durationSeconds": 900 }
+        ]
+      }
     }
   ],
   "objectives": [

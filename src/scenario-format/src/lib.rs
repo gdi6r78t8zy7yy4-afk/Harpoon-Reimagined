@@ -531,7 +531,8 @@ mod tests {
         let scenario = ScenarioDefinition::parse(SCENARIO).expect("starter scenario is valid");
         assert_eq!(scenario.id, "north-atlantic-intercept");
         assert_eq!(scenario.units.len(), 3);
-        assert_eq!(scenario.contacts.len(), 3);
+        assert_eq!(scenario.contacts.len(), 4);
+        assert_eq!(scenario.contacts[3].domain, "space");
         assert_eq!(scenario.coastlines.len(), 3);
     }
 
@@ -642,25 +643,9 @@ mod tests {
 
     #[test]
     fn asat_weapons_are_space_only_effect_weapons() {
-        let mut value: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
-        value["contacts"][0] = space_contact();
-        value["units"][0]["weapons"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({
-                "id": "asat-1",
-                "name": "SM-3 ERAM",
-                "kind": "asat",
-                "rangeNm": 900.0,
-                "domains": ["space"],
-                "ammunition": 4,
-                "hitChancePercent": 70,
-                "speedKnots": 4500,
-                "damagePercent": 0,
-                "effectDurationSeconds": 1800
-            }));
-        ScenarioDefinition::parse(&value.to_string()).expect("asat loadout is valid");
+        ScenarioDefinition::parse(SCENARIO).expect("starter asat loadout is valid");
 
+        let mut value: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
         value["units"][0]["weapons"][3]["domains"] = json!(["space", "air"]);
         let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
         assert!(error
@@ -675,6 +660,13 @@ mod tests {
             .contains("Weapon type, range, ammunition"));
 
         value["units"][0]["weapons"][3]["damagePercent"] = json!(0);
+        value["units"][0]["weapons"][3]["effectDurationSeconds"] = json!(30);
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Weapon type, range, ammunition"));
+
+        value["units"][0]["weapons"][3]["effectDurationSeconds"] = json!(1800);
         value["units"][0]["weapons"][2]["domains"] = json!(["surface", "space"]);
         let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
         assert!(error
@@ -684,21 +676,17 @@ mod tests {
 
     #[test]
     fn campaign_consequences_are_optional_and_validated() {
-        let campaign = CampaignDefinition::parse(CAMPAIGN)
-            .expect("campaign without consequences remains valid");
+        let campaign =
+            CampaignDefinition::parse(CAMPAIGN).expect("starter campaign consequences are valid");
+        assert_eq!(campaign.consequences.len(), 2);
+
+        let mut without: serde_json::Value = serde_json::from_str(CAMPAIGN).unwrap();
+        without.as_object_mut().unwrap().remove("consequences");
+        let campaign = CampaignDefinition::parse(&without.to_string())
+            .expect("campaigns authored before consequences remain valid");
         assert!(campaign.consequences.is_empty());
 
         let mut value: serde_json::Value = serde_json::from_str(CAMPAIGN).unwrap();
-        value["consequences"] = json!([{
-            "id": "isr-restricted",
-            "minEscalation": 1,
-            "title": "Allied ISR restricted",
-            "description": "Partners withhold orbital tasking after counterspace strikes."
-        }]);
-        let campaign =
-            CampaignDefinition::parse(&value.to_string()).expect("authored consequence is valid");
-        assert_eq!(campaign.consequences.len(), 1);
-
         value["consequences"][0]["minEscalation"] = json!(0);
         let error = CampaignDefinition::parse(&value.to_string()).unwrap_err();
         assert!(error
@@ -733,8 +721,9 @@ mod tests {
     #[test]
     fn parses_weapon_loadouts_and_rejects_invalid_accuracy() {
         let scenario = ScenarioDefinition::parse(SCENARIO).expect("weapon loadouts are valid");
-        assert_eq!(scenario.units[0].weapons.len(), 3);
+        assert_eq!(scenario.units[0].weapons.len(), 4);
         assert_eq!(scenario.units[0].weapons[2].kind, "cyber");
+        assert_eq!(scenario.units[0].weapons[3].kind, "asat");
 
         let legacy_scenario = SCENARIO.replace(", \"damagePercent\": 80", "");
         let legacy =
