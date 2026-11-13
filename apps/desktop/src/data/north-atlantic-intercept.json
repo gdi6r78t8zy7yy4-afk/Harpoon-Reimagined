@@ -21,7 +21,8 @@
       ],
       "weapons": [
         { "id": "sm-6", "name": "SM-6", "kind": "missile", "rangeNm": 120, "domains": ["air"], "ammunition": 8, "hitChancePercent": 78, "speedKnots": 2000, "damagePercent": 80 },
-        { "id": "harpoon", "name": "Harpoon", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 72, "speedKnots": 550, "damagePercent": 100 }
+        { "id": "harpoon", "name": "Harpoon", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 72, "speedKnots": 550, "damagePercent": 100 },
+        { "id": "cyber-disruptor", "name": "Cyber Disruptor", "kind": "cyber", "rangeNm": 120, "domains": ["surface", "air", "subsurface"], "ammunition": 2, "hitChancePercent": 78, "speedKnots": 5000, "damagePercent": 0, "effectDurationSeconds": 900 }
       ]
     },
     {

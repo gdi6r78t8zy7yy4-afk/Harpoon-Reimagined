@@ -24,13 +24,14 @@ export type Sensor = {
 export type Weapon = {
   id: string
   name: string
-  kind: 'missile' | 'torpedo' | 'gun'
+  kind: 'missile' | 'torpedo' | 'gun' | 'cyber'
   rangeNm: number
   domains: Array<'surface' | 'air' | 'subsurface'>
   ammunition: number
   hitChancePercent: number
   speedKnots: number
   damagePercent: number
+  effectDurationSeconds: number
 }
 
 export type DefenseSystem = {
@@ -53,6 +54,8 @@ export type Contact = {
   identified: boolean
   health: number
   defenses: DefenseSystem[]
+  defensesDisruptedUntilSeconds: number
+  defenseDisruptionSource: string | null
   lastReportedSeconds: number
   confidenceAtLastReport: number
   rangeUncertaintyNm: number
@@ -113,13 +116,15 @@ export type Engagement = {
   unitName: string
   weaponId: string
   weaponName: string
+  weaponKind: Weapon['kind']
   contactId: string
   contactLabel: string
   hitChancePercent: number
   damagePercent: number
+  disruptionDurationSeconds: number
   damageAppliedPercent: number
   interceptedBy: string | null
-  status: 'in_flight' | 'hit' | 'damaged' | 'miss' | 'intercepted' | 'aborted'
+  status: 'in_flight' | 'hit' | 'damaged' | 'disrupted' | 'miss' | 'intercepted' | 'aborted'
   hit: boolean
 }
 
@@ -142,6 +147,7 @@ export type ScenarioResult = {
   hits: number
   damaged: number
   intercepted: number
+  cyberDisruptions: number
   misses: number
   aborted: number
 }

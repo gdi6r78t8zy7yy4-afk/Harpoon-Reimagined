@@ -41,6 +41,10 @@ pub struct Contact {
     #[serde(default)]
     pub defenses: Vec<DefenseSystem>,
     #[serde(default)]
+    pub defenses_disrupted_until_seconds: u64,
+    #[serde(default)]
+    pub defense_disruption_source: Option<String>,
+    #[serde(default)]
     pub last_reported_seconds: u64,
     #[serde(default)]
     pub confidence_at_last_report: u8,
@@ -68,6 +72,10 @@ fn default_contact_health() -> u8 {
 
 fn default_legacy_damage_percent() -> u8 {
     100
+}
+
+fn default_legacy_weapon_kind() -> String {
+    "missile".into()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -100,11 +108,15 @@ pub struct Engagement {
     pub unit_name: String,
     pub weapon_id: String,
     pub weapon_name: String,
+    #[serde(default = "default_legacy_weapon_kind")]
+    pub weapon_kind: String,
     pub contact_id: String,
     pub contact_label: String,
     pub hit_chance_percent: u8,
     #[serde(default = "default_legacy_damage_percent")]
     pub damage_percent: u8,
+    #[serde(default)]
+    pub disruption_duration_seconds: u16,
     #[serde(default)]
     pub damage_applied_percent: u8,
     #[serde(default)]
@@ -229,6 +241,8 @@ impl SimulationState {
                         intercept_chance_percent: defense.intercept_chance_percent,
                     })
                     .collect(),
+                defenses_disrupted_until_seconds: 0,
+                defense_disruption_source: None,
                 last_reported_seconds: start_time_seconds,
                 confidence_at_last_report: contact.confidence,
                 range_uncertainty_nm: initial_range_uncertainty(contact.confidence),
@@ -290,6 +304,10 @@ impl SimulationState {
             } else if contact.health == 0 {
                 contact.destroyed = true;
             }
+            if contact.defenses_disrupted_until_seconds <= self.elapsed_seconds {
+                contact.defenses_disrupted_until_seconds = 0;
+                contact.defense_disruption_source = None;
+            }
             if contact.last_reported_seconds == 0 {
                 contact.last_reported_seconds = self.elapsed_seconds;
                 contact.confidence_at_last_report = contact.confidence;
@@ -312,6 +330,7 @@ impl SimulationState {
         let seconds = seconds.clamp(1, 3600);
         self.tick += 1;
         self.elapsed_seconds += seconds;
+        self.recover_disrupted_defenses();
         for unit in &mut self.units {
             if unit.speed_knots > 0 {
                 let radians = unit.heading.to_radians();
@@ -366,6 +385,14 @@ impl SimulationState {
                     if contact.destroyed {
                         engagement.hit = false;
                         engagement.status = "aborted".into();
+                    } else if engagement.weapon_kind == "cyber" {
+                        let disruption_start = contact
+                            .defenses_disrupted_until_seconds
+                            .max(engagement.impact_at_seconds);
+                        contact.defenses_disrupted_until_seconds = disruption_start
+                            .saturating_add(u64::from(engagement.disruption_duration_seconds.max(60)));
+                        contact.defense_disruption_source = Some(engagement.weapon_name.clone());
+                        engagement.status = "disrupted".into();
                     } else {
                         let survival_percent = contact
                             .defenses
@@ -374,7 +401,13 @@ impl SimulationState {
                             .fold(100_u64, |survival, defense| {
                                 survival * u64::from(100 - defense.intercept_chance_percent) / 100
                             });
-                        let intercept_chance = 100 - survival_percent;
+                        let defenses_active = contact.defenses_disrupted_until_seconds
+                            <= engagement.impact_at_seconds;
+                        let intercept_chance = if defenses_active {
+                            100 - survival_percent
+                        } else {
+                            0
+                        };
                         let defense_roll = engagement
                             .impact_at_seconds
                             .wrapping_add(engagement.id.wrapping_mul(19))
@@ -422,12 +455,18 @@ impl SimulationState {
                 engagement.status.clone(),
                 engagement.intercepted_by.clone(),
                 engagement.damage_applied_percent,
+                engagement.weapon_kind.clone(),
+                engagement.disruption_duration_seconds,
             ));
         }
-        for (weapon_name, contact_label, status, intercepted_by, damage) in impact_events {
+        for (weapon_name, contact_label, status, intercepted_by, damage, weapon_kind, disruption_duration) in impact_events {
             let message = match status.as_str() {
                 "hit" => format!("{weapon_name} hit {contact_label}"),
                 "damaged" => format!("{weapon_name} damaged {contact_label} ({damage}% damage)"),
+                "disrupted" => format!(
+                    "{weapon_name} disrupted {contact_label}'s defensive systems for {} min",
+                    u64::from(disruption_duration).div_ceil(60)
+                ),
                 "intercepted" => format!(
                     "{weapon_name} intercepted by {} protecting {contact_label}",
                     intercepted_by.unwrap_or_else(|| "defenses".into())
@@ -435,9 +474,30 @@ impl SimulationState {
                 "miss" => format!("{weapon_name} missed {contact_label}"),
                 _ => format!("{weapon_name} impact aborted; {contact_label} is no longer active"),
             };
-            self.push_event(message, "WEAPONS CONTROL".into());
+            let source = if weapon_kind == "cyber" { "CYBER OPERATIONS" } else { "WEAPONS CONTROL" };
+            self.push_event(message, source.into());
         }
+        self.recover_disrupted_defenses();
         self.maybe_complete_mission();
+    }
+
+    fn recover_disrupted_defenses(&mut self) {
+        let mut recovered = Vec::new();
+        for contact in &mut self.contacts {
+            if contact.defenses_disrupted_until_seconds == 0
+                || contact.defenses_disrupted_until_seconds > self.elapsed_seconds
+            {
+                continue;
+            }
+            contact.defenses_disrupted_until_seconds = 0;
+            recovered.push((contact.label.clone(), contact.defense_disruption_source.take()));
+        }
+        for (label, source) in recovered {
+            self.push_event(
+                format!("Defensive systems restored on {label}"),
+                source.unwrap_or_else(|| "CYBER DEFENSE".into()),
+            );
+        }
     }
 
     pub fn issue_course(&mut self, unit_id: &str, heading: u16) -> Result<(), String> {
@@ -700,10 +760,12 @@ impl SimulationState {
             unit_name: unit_name.clone(),
             weapon_id: weapon_id.to_string(),
             weapon_name: weapon.name.clone(),
+            weapon_kind: weapon.kind.clone(),
             contact_id: contact_id.to_string(),
             contact_label: contact_label.clone(),
             hit_chance_percent,
             damage_percent: weapon.damage_percent,
+            disruption_duration_seconds: weapon.effect_duration_seconds,
             damage_applied_percent: 0,
             intercepted_by: None,
             status: "in_flight".into(),
@@ -1014,6 +1076,134 @@ mod tests {
             assert_eq!(state.engagements.last().unwrap().status, expected_status);
         }
         assert!(state.contacts[0].destroyed);
+    }
+
+    fn aim_the_next_engagement_for_a_hit(
+        state: &mut SimulationState,
+        unit_id: &str,
+        weapon_id: &str,
+        contact_id: &str,
+    ) {
+        let id_salt = unit_id
+            .bytes()
+            .chain(weapon_id.bytes())
+            .chain(contact_id.bytes())
+            .fold(0_u64, |sum, byte| sum + u64::from(byte));
+        let engagement_id = state.engagements.last().map_or(1, |item| item.id + 1);
+        let roll = (state.elapsed_seconds + state.tick * 17 + engagement_id * 31 + id_salt) % 100;
+        state.elapsed_seconds += (100 - roll) % 100;
+    }
+
+    #[test]
+    fn cyber_hit_disrupts_defenses_without_harming_the_target() {
+        let mut state = SimulationState::default();
+        state.classify_contact("c-101", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "cyber-disruptor", "c-101");
+
+        state
+            .fire_weapon("ddg-01", "cyber-disruptor", "c-101")
+            .unwrap();
+        assert_eq!(state.units[0].weapons[2].ammunition, 1);
+        let seconds_to_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_impact);
+
+        assert_eq!(state.engagements[0].status, "disrupted");
+        assert_eq!(state.contacts[0].health, 100);
+        assert!(!state.contacts[0].destroyed);
+        assert_eq!(
+            state.contacts[0].defenses_disrupted_until_seconds,
+            state.engagements[0].impact_at_seconds + 900
+        );
+        assert_eq!(
+            state.contacts[0].defense_disruption_source.as_deref(),
+            Some("Cyber Disruptor")
+        );
+        assert!(state.events.iter().any(|event| {
+            event.source == "CYBER OPERATIONS" && event.message.contains("disrupted")
+        }));
+    }
+
+    #[test]
+    fn kinetic_weapons_bypass_defenses_while_a_target_is_disrupted() {
+        let mut state = SimulationState::default();
+        state.classify_contact("c-101", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "cyber-disruptor", "c-101");
+        state
+            .fire_weapon("ddg-01", "cyber-disruptor", "c-101")
+            .unwrap();
+        let seconds_to_cyber_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_cyber_impact);
+        assert_eq!(state.engagements[0].status, "disrupted");
+
+        // With active defenses this chance would intercept every kinetic shot.
+        state.contacts[0].defenses[0].intercept_chance_percent = 100;
+        let charges_before = state.contacts[0].defenses[0].remaining_charges;
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "harpoon", "c-101");
+        state.fire_weapon("ddg-01", "harpoon", "c-101").unwrap();
+
+        assert!(state.engagements[1].impact_at_seconds
+            < state.contacts[0].defenses_disrupted_until_seconds);
+        let seconds_to_kinetic_impact =
+            state.engagements[1].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_kinetic_impact);
+
+        assert_eq!(state.engagements[1].status, "hit");
+        assert!(state.contacts[0].destroyed);
+        assert_eq!(
+            state.contacts[0].defenses[0].remaining_charges,
+            charges_before
+        );
+    }
+
+    #[test]
+    fn disrupted_defenses_recover_after_the_disruption_window_expires() {
+        let mut state = SimulationState::default();
+        state.classify_contact("c-101", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "cyber-disruptor", "c-101");
+        state
+            .fire_weapon("ddg-01", "cyber-disruptor", "c-101")
+            .unwrap();
+        let seconds_to_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_impact);
+
+        let disruption_expires = state.contacts[0].defenses_disrupted_until_seconds;
+        assert!(disruption_expires > state.elapsed_seconds);
+        state.advance(disruption_expires - state.elapsed_seconds + 1);
+
+        assert_eq!(state.contacts[0].defenses_disrupted_until_seconds, 0);
+        assert!(state.contacts[0].defense_disruption_source.is_none());
+        assert!(state.events.iter().any(|event| {
+            event.message == "Defensive systems restored on HOSTILE SURFACE"
+                && event.source == "Cyber Disruptor"
+        }));
+    }
+
+    #[test]
+    fn m10_cyber_fields_default_when_loading_older_saves() {
+        let mut state = SimulationState::default();
+        state.classify_contact("c-101", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "harpoon", "c-101");
+        state.fire_weapon("ddg-01", "harpoon", "c-101").unwrap();
+        let mut old_save = serde_json::to_value(state).unwrap();
+        let object = old_save.as_object_mut().unwrap();
+        for field in ["defensesDisruptedUntilSeconds", "defenseDisruptionSource"] {
+            object["contacts"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+        }
+        for field in ["weaponKind", "disruptionDurationSeconds"] {
+            object["engagements"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+        }
+
+        let restored: SimulationState = serde_json::from_value(old_save).unwrap();
+        assert_eq!(restored.contacts[0].defenses_disrupted_until_seconds, 0);
+        assert!(restored.contacts[0].defense_disruption_source.is_none());
+        assert_eq!(restored.engagements[0].weapon_kind, "missile");
+        assert_eq!(restored.engagements[0].disruption_duration_seconds, 0);
     }
 
     #[test]

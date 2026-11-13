@@ -162,16 +162,17 @@ export function TacticalScene({ units, contacts, engagements, elapsedSeconds, se
       const start = new Vector3(source.x, 0.2, source.z)
       const destination = new Vector3(target.x, 0.2, target.z)
       const position = Vector3.Lerp(start, destination, progress)
+      const isCyber = engagement.weaponKind === 'cyber'
       const trail = MeshBuilder.CreateLines(`engagement-track-${engagement.id}`, { points: [start, position] }, scene)
-      trail.color = new Color3(0.3, 0.95, 0.78)
+      trail.color = isCyber ? new Color3(0.76, 0.55, 0.88) : new Color3(0.3, 0.95, 0.78)
       trail.alpha = 0.9
       trail.isPickable = false
       const projectile = MeshBuilder.CreateSphere(`engagement-projectile-${engagement.id}`, { diameter: 0.25, segments: 8 }, scene)
       projectile.position.copyFrom(position)
       projectile.isPickable = false
       const projectileMaterial = new StandardMaterial(`engagement-projectile-material-${engagement.id}`, scene)
-      projectileMaterial.diffuseColor = new Color3(0.28, 0.94, 0.76)
-      projectileMaterial.emissiveColor = new Color3(0.16, 0.72, 0.56)
+      projectileMaterial.diffuseColor = isCyber ? new Color3(0.71, 0.49, 0.86) : new Color3(0.28, 0.94, 0.76)
+      projectileMaterial.emissiveColor = isCyber ? new Color3(0.55, 0.34, 0.72) : new Color3(0.16, 0.72, 0.56)
       projectile.material = projectileMaterial
     }
     const recentOutcomes = engagements.filter((engagement) => engagement.status !== 'in_flight').slice(-4)
@@ -181,6 +182,7 @@ export function TacticalScene({ units, contacts, engagements, elapsedSeconds, se
       const palette = {
         hit: new Color3(0.98, 0.31, 0.25),
         damaged: new Color3(0.98, 0.68, 0.28),
+        disrupted: new Color3(0.76, 0.55, 0.88),
         intercepted: new Color3(0.35, 0.78, 0.94),
         miss: new Color3(0.58, 0.69, 0.69),
         aborted: new Color3(0.42, 0.5, 0.51),

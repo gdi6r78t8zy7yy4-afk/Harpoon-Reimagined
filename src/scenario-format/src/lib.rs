@@ -40,6 +40,8 @@ pub struct WeaponDefinition {
     pub speed_knots: u16,
     #[serde(default = "default_weapon_damage_percent")]
     pub damage_percent: u8,
+    #[serde(default)]
+    pub effect_duration_seconds: u16,
 }
 
 fn default_weapon_damage_percent() -> u8 {
@@ -195,7 +197,8 @@ impl ScenarioDefinition {
                         "Weapon ids and names must be non-empty and ids unique per unit",
                     );
                 }
-                if !matches!(weapon.kind.as_str(), "missile" | "torpedo" | "gun")
+                let is_cyber = weapon.kind == "cyber";
+                if !matches!(weapon.kind.as_str(), "missile" | "torpedo" | "gun" | "cyber")
                     || !weapon.range_nm.is_finite()
                     || weapon.range_nm <= 0.0
                     || weapon.range_nm > 1000.0
@@ -209,10 +212,14 @@ impl ScenarioDefinition {
                     || weapon.hit_chance_percent > 100
                     || weapon.speed_knots == 0
                     || weapon.speed_knots > 5000
-                    || weapon.damage_percent == 0
                     || weapon.damage_percent > 100
+                    || (is_cyber
+                        && (weapon.damage_percent != 0
+                            || !(60..=7200).contains(&weapon.effect_duration_seconds)))
+                    || (!is_cyber
+                        && (weapon.damage_percent == 0 || weapon.effect_duration_seconds != 0))
                 {
-                    return invalid("Weapon type, range, ammunition, accuracy, speed, damage, or domain is outside supported limits");
+                    return invalid("Weapon type, range, ammunition, accuracy, speed, damage, effect duration, or domain is outside supported limits");
                 }
             }
         }
@@ -367,7 +374,8 @@ mod tests {
     #[test]
     fn parses_weapon_loadouts_and_rejects_invalid_accuracy() {
         let scenario = ScenarioDefinition::parse(SCENARIO).expect("weapon loadouts are valid");
-        assert_eq!(scenario.units[0].weapons.len(), 2);
+        assert_eq!(scenario.units[0].weapons.len(), 3);
+        assert_eq!(scenario.units[0].weapons[2].kind, "cyber");
 
         let legacy_scenario = SCENARIO.replace(", \"damagePercent\": 80", "");
         let legacy =
@@ -381,6 +389,21 @@ mod tests {
             .to_string()
             .to_string()
             .contains("Weapon type, range, ammunition, accuracy, speed, damage"));
+    }
+
+    #[test]
+    fn cyber_weapons_require_a_bounded_disruption_duration_and_no_hull_damage() {
+        let cyber = SCENARIO
+            .replacen("\"kind\": \"missile\"", "\"kind\": \"cyber\"", 1)
+            .replace("\"damagePercent\": 80", "\"damagePercent\": 0, \"effectDurationSeconds\": 900");
+        let parsed = ScenarioDefinition::parse(&cyber).expect("cyber weapon is valid");
+        assert_eq!(parsed.units[0].weapons[0].kind, "cyber");
+        assert_eq!(parsed.units[0].weapons[0].effect_duration_seconds, 900);
+
+        let invalid_duration = cyber.replace("\"effectDurationSeconds\": 900", "\"effectDurationSeconds\": 0");
+        assert!(ScenarioDefinition::parse(&invalid_duration).is_err());
+        let invalid_damage = cyber.replace("\"damagePercent\": 0", "\"damagePercent\": 1");
+        assert!(ScenarioDefinition::parse(&invalid_damage).is_err());
     }
 
     #[test]

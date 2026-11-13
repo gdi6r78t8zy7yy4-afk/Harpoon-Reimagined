@@ -9,7 +9,7 @@ declare global {
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
 type ScenarioDefense = { id: string; name: string; charges: number; interceptChancePercent: number }
-type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed' | 'health' | 'defenses'> & { position: { x: number; z: number }; defenses: ScenarioDefense[] }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed' | 'health' | 'defenses' | 'defensesDisruptedUntilSeconds' | 'defenseDisruptionSource'> & { position: { x: number; z: number }; defenses: ScenarioDefense[] }
 
 const initialRangeUncertainty = (confidence: number) => 1 + (100 - confidence) * 0.12
 const initialBearingUncertainty = (confidence: number) => 2 + (100 - confidence) * 0.5
@@ -37,7 +37,7 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false, health: 100, defenses: (contact.defenses ?? []).map(({ charges, ...defense }) => ({ ...defense, remainingCharges: charges })) })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false, health: 100, defensesDisruptedUntilSeconds: 0, defenseDisruptionSource: null, defenses: (contact.defenses ?? []).map(({ charges, ...defense }) => ({ ...defense, remainingCharges: charges })) })),
     engagements: [],
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
@@ -102,19 +102,31 @@ function normalizeBrowserContacts(state: SimulationState) {
     if (typeof contact.destroyed !== 'boolean') contact.destroyed = false
     if (!Number.isFinite(contact.health)) contact.health = 100
     if (!Array.isArray(contact.defenses)) contact.defenses = []
+    if (!Number.isFinite(contact.defensesDisruptedUntilSeconds)) contact.defensesDisruptedUntilSeconds = 0
+    if (typeof contact.defenseDisruptionSource !== 'string') contact.defenseDisruptionSource = null
     if (contact.destroyed) contact.health = 0
     else if (contact.health <= 0) contact.destroyed = true
   }
   if (!Array.isArray(state.engagements)) state.engagements = []
   for (const engagement of state.engagements) {
     if (!Number.isFinite(engagement.damagePercent) || engagement.damagePercent <= 0) engagement.damagePercent = 100
+    if (typeof engagement.weaponKind !== 'string') engagement.weaponKind = 'missile'
+    if (!Number.isFinite(engagement.disruptionDurationSeconds)) engagement.disruptionDurationSeconds = 0
     if (!Number.isFinite(engagement.damageAppliedPercent)) engagement.damageAppliedPercent = 0
     if (typeof engagement.interceptedBy !== 'string') engagement.interceptedBy = null
   }
 }
+
+function normalizeScenarioResults(campaign: CampaignProgress) {
+  if (!Array.isArray(campaign.scenarioResults)) campaign.scenarioResults = []
+  for (const result of campaign.scenarioResults) {
+    if (!Number.isFinite(result.cyberDisruptions)) result.cyberDisruptions = 0
+  }
+}
+
 normalizeBrowserContacts(browserState)
 let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
-if (!Array.isArray(browserCampaign.scenarioResults)) browserCampaign.scenarioResults = []
+normalizeScenarioResults(browserCampaign)
 let browserSavedAt: number | null = loadedBrowserSave?.savedAt ?? null
 let browserSettings: CampaignSettings = loadedBrowserSave?.settings ?? { timeScale: 5, layersVisible: true }
 
@@ -154,6 +166,7 @@ export async function loadCampaign(): Promise<CampaignSession> {
   browserState = { ...save.simulation, running: false }
   normalizeBrowserContacts(browserState)
   browserCampaign = save.campaign
+  normalizeScenarioResults(browserCampaign)
   browserSettings = save.settings ?? { timeScale: 5, layersVisible: true }
   browserSavedAt = save.savedAt
   return { simulation: structuredClone(browserState), status: browserStatus() }
@@ -173,6 +186,7 @@ export async function advance(seconds = 60) {
   const safeSeconds = Math.max(1, Math.min(seconds, 3600))
   browserState.tick += 1
   browserState.elapsedSeconds += safeSeconds
+  recoverBrowserDisruptions()
   for (const unit of browserState.units) {
     const radians = unit.heading * Math.PI / 180
     const distance = unit.speedKnots * safeSeconds / 3600
@@ -196,14 +210,20 @@ export async function advance(seconds = 60) {
   for (const engagement of browserState.engagements) {
     if (engagement.status !== 'in_flight' || engagement.impactAtSeconds > browserState.elapsedSeconds) continue
     const target = browserState.contacts.find((item) => item.id === engagement.contactId)
-    if (engagement.hit && target && !target.destroyed) {
+    if (engagement.hit && target && !target.destroyed && engagement.weaponKind === 'cyber') {
+      const disruptionStart = Math.max(target.defensesDisruptedUntilSeconds, engagement.impactAtSeconds)
+      target.defensesDisruptedUntilSeconds = disruptionStart + Math.max(60, engagement.disruptionDurationSeconds)
+      target.defenseDisruptionSource = engagement.weaponName
+      engagement.status = 'disrupted'
+    } else if (engagement.hit && target && !target.destroyed) {
       const survival = target.defenses.filter((defense) => defense.remainingCharges > 0).reduce(
         (chance, defense) => Math.floor(chance * (100 - defense.interceptChancePercent) / 100),
         100,
       )
+      const defenseChance = target.defensesDisruptedUntilSeconds > engagement.impactAtSeconds ? 0 : 100 - survival
       const contactSalt = [...target.id].reduce((sum, character) => sum + character.charCodeAt(0), 0)
       const defenseRoll = (engagement.impactAtSeconds + engagement.id * 19 + contactSalt) % 100
-      if (defenseRoll < 100 - survival) {
+      if (defenseRoll < defenseChance) {
         const defense = target.defenses.find((item) => item.remainingCharges > 0)
         if (defense) {
           defense.remainingCharges -= 1
@@ -227,13 +247,16 @@ export async function advance(seconds = 60) {
       ? `${engagement.weaponName} hit ${engagement.contactLabel}`
       : engagement.status === 'damaged'
         ? `${engagement.weaponName} damaged ${engagement.contactLabel} (${engagement.damageAppliedPercent}% damage)`
+        : engagement.status === 'disrupted'
+          ? `${engagement.weaponName} disrupted ${engagement.contactLabel}'s defensive systems for ${Math.ceil(engagement.disruptionDurationSeconds / 60)} min`
         : engagement.status === 'intercepted'
           ? `${engagement.weaponName} intercepted by ${engagement.interceptedBy ?? 'defenses'} protecting ${engagement.contactLabel}`
       : engagement.status === 'miss'
         ? `${engagement.weaponName} missed ${engagement.contactLabel}`
         : `${engagement.weaponName} impact aborted; ${engagement.contactLabel} is no longer active`
-    addEvent(message, 'WEAPONS CONTROL')
+    addEvent(message, engagement.weaponKind === 'cyber' ? 'CYBER OPERATIONS' : 'WEAPONS CONTROL')
   }
+  recoverBrowserDisruptions()
   updateMissionCompletion()
   return structuredClone(browserState)
 }
@@ -371,7 +394,7 @@ export async function fireWeapon(unitId: string, weaponId: string, contactId: st
   const roll = (browserState.elapsedSeconds + browserState.tick * 17 + id * 31 + idSalt) % 100
   const hit = roll < hitChancePercent
   browserState.units[unitIndex].weapons[weaponIndex].ammunition -= 1
-  browserState.engagements.push({ id, elapsedSeconds: browserState.elapsedSeconds, impactAtSeconds: browserState.elapsedSeconds + flightSeconds, unitId, unitName: unit.name, weaponId, weaponName: weapon.name, contactId, contactLabel: contact.label, hitChancePercent, damagePercent: weapon.damagePercent, damageAppliedPercent: 0, interceptedBy: null, status: 'in_flight', hit })
+  browserState.engagements.push({ id, elapsedSeconds: browserState.elapsedSeconds, impactAtSeconds: browserState.elapsedSeconds + flightSeconds, unitId, unitName: unit.name, weaponId, weaponName: weapon.name, weaponKind: weapon.kind, contactId, contactLabel: contact.label, hitChancePercent, damagePercent: weapon.damagePercent, disruptionDurationSeconds: weapon.effectDurationSeconds ?? 0, damageAppliedPercent: 0, interceptedBy: null, status: 'in_flight', hit })
   browserState.engagements = browserState.engagements.slice(-50)
   addEvent(`${weapon.name} launched at ${contact.label} (${hitChancePercent}% solution)`, unit.name)
   return structuredClone(browserState)
@@ -394,6 +417,7 @@ function updateMissionCompletion() {
     hits: countStatus('hit'),
     damaged: countStatus('damaged'),
     intercepted: countStatus('intercepted'),
+    cyberDisruptions: countStatus('disrupted'),
     misses: countStatus('miss'),
     aborted: countStatus('aborted'),
   }
@@ -401,6 +425,16 @@ function updateMissionCompletion() {
   if (existingResult >= 0) browserCampaign.scenarioResults[existingResult] = result
   else browserCampaign.scenarioResults.push(result)
   addEvent('Mission complete: contact picture established', 'MISSION CONTROL')
+}
+
+function recoverBrowserDisruptions() {
+  for (const contact of browserState.contacts) {
+    if (contact.defensesDisruptedUntilSeconds === 0 || contact.defensesDisruptedUntilSeconds > browserState.elapsedSeconds) continue
+    const source = contact.defenseDisruptionSource ?? 'CYBER DEFENSE'
+    contact.defensesDisruptedUntilSeconds = 0
+    contact.defenseDisruptionSource = null
+    addEvent(`Defensive systems restored on ${contact.label}`, source)
+  }
 }
 
 function addEvent(message: string, source: string) {

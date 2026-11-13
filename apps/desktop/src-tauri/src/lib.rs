@@ -65,6 +65,8 @@ struct ScenarioResult {
     hits: u16,
     damaged: u16,
     intercepted: u16,
+    #[serde(default)]
+    cyber_disruptions: u16,
     misses: u16,
     aborted: u16,
 }
@@ -125,6 +127,7 @@ fn record_scenario_result(progress: &mut CampaignProgress, simulation: &Simulati
         hits: count_status("hit"),
         damaged: count_status("damaged"),
         intercepted: count_status("intercepted"),
+        cyber_disruptions: count_status("disrupted"),
         misses: count_status("miss"),
         aborted: count_status("aborted"),
     };
@@ -582,7 +585,7 @@ mod tests {
         simulation.elapsed_seconds = 12_345;
         simulation.contacts[0].identified = true;
         simulation.contacts[1].destroyed = true;
-        simulation.engagements = ["hit", "damaged", "intercepted", "miss", "aborted"]
+        simulation.engagements = ["hit", "damaged", "intercepted", "disrupted", "miss", "aborted"]
             .into_iter()
             .enumerate()
             .map(|(index, status)| Engagement {
@@ -593,14 +596,16 @@ mod tests {
                 unit_name: "USS ARLEIGH BURKE".into(),
                 weapon_id: format!("weapon-{index}"),
                 weapon_name: format!("Weapon {index}"),
+                weapon_kind: if status == "disrupted" { "cyber" } else { "missile" }.into(),
                 contact_id: "c-101".into(),
                 contact_label: "Hostile surface".into(),
                 hit_chance_percent: 80,
                 damage_percent: 50,
+                disruption_duration_seconds: if status == "disrupted" { 900 } else { 0 },
                 damage_applied_percent: 50,
                 intercepted_by: None,
                 status: status.into(),
-                hit: status == "hit" || status == "damaged",
+                hit: status == "hit" || status == "damaged" || status == "disrupted",
             })
             .collect();
         let mut campaign = CampaignProgress::default();
@@ -617,10 +622,11 @@ mod tests {
         assert_eq!(result.completed_at_seconds, 12_345);
         assert_eq!(result.contacts_classified, 1);
         assert_eq!(result.targets_destroyed, 1);
-        assert_eq!(result.engagements_launched, 5);
+        assert_eq!(result.engagements_launched, 6);
         assert_eq!(result.hits, 1);
         assert_eq!(result.damaged, 1);
         assert_eq!(result.intercepted, 1);
+        assert_eq!(result.cyber_disruptions, 1);
         assert_eq!(result.misses, 1);
         assert_eq!(result.aborted, 1);
 
@@ -647,6 +653,25 @@ mod tests {
     }
 
     #[test]
+    fn older_scenario_results_default_to_no_cyber_disruptions() {
+        let legacy = serde_json::json!({
+            "scenarioId": "north-atlantic-intercept",
+            "completedAtSeconds": 900,
+            "contactsClassified": 2,
+            "targetsDestroyed": 1,
+            "engagementsLaunched": 3,
+            "hits": 1,
+            "damaged": 1,
+            "intercepted": 1,
+            "misses": 0,
+            "aborted": 0
+        });
+        let result: ScenarioResult =
+            serde_json::from_value(legacy).expect("pre-cyber scenario result loads");
+        assert_eq!(result.cyber_disruptions, 0);
+    }
+
+    #[test]
     fn sqlite_round_trip_preserves_campaign_simulation_and_settings() {
         let directory = std::env::temp_dir().join(format!(
             "harpoon-save-test-{}-{}",
@@ -663,10 +688,11 @@ mod tests {
             completed_at_seconds: 1_800,
             contacts_classified: 2,
             targets_destroyed: 1,
-            engagements_launched: 3,
+            engagements_launched: 4,
             hits: 1,
             damaged: 1,
             intercepted: 1,
+            cyber_disruptions: 1,
             misses: 0,
             aborted: 0,
         });
@@ -703,6 +729,7 @@ mod tests {
         assert_eq!(restored.campaign.scenario_results.len(), 1);
         assert_eq!(restored.campaign.scenario_results[0].scenario_id, "intro");
         assert_eq!(restored.campaign.scenario_results[0].intercepted, 1);
+        assert_eq!(restored.campaign.scenario_results[0].cyber_disruptions, 1);
         assert_eq!(restored.settings.time_scale, 15);
         assert!(!restored.settings.layers_visible);
         assert_eq!(restored.simulation.tick, simulation.tick);

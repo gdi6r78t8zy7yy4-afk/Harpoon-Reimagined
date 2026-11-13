@@ -47,7 +47,7 @@ Run `./scripts/validate-content.sh` to validate every JSON scenario and campaign
 
 ## Status
 
-The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems and multiple authored scenarios remain future work. The first campaign slice now tracks progression and local save/load.
+The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems and multiple authored scenarios remain future work. The first campaign slice now tracks progression and local save/load, and cyber weapons can suppress a hostile's defensive systems for a bounded window.
 
 ## Contributing
 

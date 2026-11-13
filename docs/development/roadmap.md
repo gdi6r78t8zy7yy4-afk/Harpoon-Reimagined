@@ -82,9 +82,17 @@ Follow-up work can improve multi-sensor report fusion and provide richer uncerta
 - [x] Show the saved result as an after-action summary and keep older saves readable.
 - **Exit:** each completed scenario has a reviewable result that remains part of its campaign save.
 
+## M10 — Cyber defense suppression (complete)
+
+- [x] Define scenario-loaded cyber weapons with a bounded disruption duration and no hull damage.
+- [x] Suppress a target's defensive systems when a cyber effect lands, letting follow-on kinetic weapons bypass them while the window holds.
+- [x] Recover defenses after the disruption window expires and attribute the effect to its source in events and saves.
+- [x] Show distinct in-flight and outcome visuals for cyber effects, suppression status on the target panel, and cyber outcomes in the after-action report.
+- **Exit:** a cyber launch visibly suppresses a hostile's defensive systems for a bounded time and restores them afterward.
+
 ## Future weapon domains (planned)
 
-- Add cyber weapons as a gameplay domain, with disruption effects against sensors and command systems, clear duration and recovery rules, and player-visible attribution.
+- Extend cyber weapons beyond defense suppression to sensor and command-system disruption, with clear duration and recovery rules and player-visible attribution.
 - Add space weapons and orbital effects, with space-based sensors, interception, and weapon employment represented in scenarios and the tactical picture.
 - Define countermeasures, escalation, and campaign consequences for both domains before implementation.
 
