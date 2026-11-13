@@ -90,11 +90,18 @@ Follow-up work can improve multi-sensor report fusion and provide richer uncerta
 - [x] Show distinct in-flight and outcome visuals for cyber effects, suppression status on the target panel, and cyber outcomes in the after-action report.
 - **Exit:** a cyber launch visibly suppresses a hostile's defensive systems for a bounded time and restores them afterward.
 
+## M11 — Space domain and counter-space (planned)
+
+- [x] Define the space domain model, engagement rules, countermeasures, escalation, and campaign consequences in [design notes](../game-design/space-domain.md) and [ADR 0002](../adr/0002-space-domain-model.md).
+- [ ] Add `space` as a contact and weapon target domain with moving ground-track contacts validated against orbital motion bounds.
+- [ ] Add scenario-defined satellite passes that refresh tracks through the existing sensor fusion pipeline on deterministic revisit windows.
+- [ ] Add anti-satellite weapons that disable a satellite's sensing for a bounded window, defended by the existing interception model and post-attack hardening cooldowns.
+- [ ] Record counterspace actions in the after-action report and expose at least one escalation-gated campaign consequence.
+- **Exit:** a scenario can be played where blinding or restoring orbital sensing changes the tactical picture and is remembered by the campaign save.
+
 ## Future weapon domains (planned)
 
-- Extend cyber weapons beyond defense suppression to sensor and command-system disruption, with clear duration and recovery rules and player-visible attribution.
-- Add space weapons and orbital effects, with space-based sensors, interception, and weapon employment represented in scenarios and the tactical picture.
-- Define countermeasures, escalation, and campaign consequences for both domains before implementation.
+- Extend cyber weapons beyond defense suppression to sensor and command-system disruption, with clear duration and recovery rules and player-visible attribution. Define these rules before implementation.
 
 ## Ongoing quality
 
