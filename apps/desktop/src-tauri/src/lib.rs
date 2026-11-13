@@ -154,15 +154,18 @@ fn record_scenario_result(progress: &mut CampaignProgress, simulation: &Simulati
     } else {
         progress.scenario_results.push(result);
     }
-    // First use per scenario counts: cyber adds 1, disabling a satellite adds 2.
-    // Repeat strikes within one scenario do not inflate the level further.
-    progress.escalation_level = progress
-        .scenario_results
+    progress.escalation_level = escalation_from_results(&progress.scenario_results);
+}
+
+// First use per scenario counts: cyber adds 1, disabling a satellite adds 2.
+// Repeat strikes within one scenario do not inflate the level further.
+fn escalation_from_results(results: &[ScenarioResult]) -> u32 {
+    results
         .iter()
         .map(|result| {
             u32::from(result.cyber_disruptions > 0) + u32::from(result.satellites_disabled > 0) * 2
         })
-        .sum();
+        .sum()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -246,6 +249,10 @@ fn read_campaign_save(database: &Connection) -> Result<Option<CampaignSave>, Str
             save.save_version
         ));
     }
+    // Older saves may predate escalation (or the space domain), leaving a stale
+    // level on disk. Recompute from recorded results so the field self-heals.
+    let mut save = save;
+    save.campaign.escalation_level = escalation_from_results(&save.campaign.scenario_results);
     Ok(Some(save))
 }
 
@@ -834,6 +841,64 @@ mod tests {
         assert_eq!(restored.settings.time_scale, 15);
         assert!(!restored.settings.layers_visible);
         assert_eq!(restored.simulation.tick, simulation.tick);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("test database cleanup succeeds");
+    }
+
+    #[test]
+    fn recomputes_escalation_when_loading_a_legacy_save() {
+        let directory = std::env::temp_dir().join(format!(
+            "harpoon-save-legacy-test-{}-{}",
+            std::process::id(),
+            now_millis()
+        ));
+        let (database, _) = initialize_database(directory.clone()).expect("db initializes");
+
+        // A save written before escalation existed has no escalationLevel key
+        // even though its recorded results imply a level.
+        let mut campaign = CampaignProgress::default();
+        campaign.completed_scenarios.push("intro".into());
+        campaign.scenario_results.push(ScenarioResult {
+            scenario_id: "intro".into(),
+            completed_at_seconds: 1_800,
+            contacts_classified: 2,
+            targets_destroyed: 0,
+            engagements_launched: 3,
+            hits: 0,
+            damaged: 0,
+            intercepted: 0,
+            cyber_disruptions: 1,
+            space_strikes: 1,
+            satellites_disabled: 1,
+            misses: 1,
+            aborted: 0,
+        });
+
+        let save = CampaignSave {
+            save_version: SAVE_VERSION,
+            saved_at: now_millis(),
+            campaign,
+            settings: CampaignSettings::default(),
+            simulation: SimulationState::default(),
+        };
+        let mut payload = serde_json::to_value(&save).expect("save serializes");
+        payload["campaign"]
+            .as_object_mut()
+            .unwrap()
+            .remove("escalationLevel");
+        database
+            .execute(
+                "INSERT INTO campaign_saves (slot, save_version, saved_at_ms, payload_json) \
+                 VALUES ('campaign', ?1, ?2, ?3)",
+                params![SAVE_VERSION, save.saved_at as i64, payload.to_string()],
+            )
+            .expect("legacy save writes to SQLite");
+
+        let restored = read_campaign_save(&database)
+            .expect("save is readable")
+            .expect("save exists");
+        assert_eq!(restored.campaign.escalation_level, 3);
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("test database cleanup succeeds");
