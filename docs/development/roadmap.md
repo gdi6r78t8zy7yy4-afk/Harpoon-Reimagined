@@ -75,6 +75,13 @@ Follow-up work can improve multi-sensor report fusion and provide richer uncerta
 - [x] Rebuild engagement visuals from saved simulation state and keep in-flight positions synchronized with simulation time.
 - **Exit:** players can follow each active engagement from launch through its resolved outcome in the tactical view.
 
+## M9 — After-action review and campaign records (complete)
+
+- [x] Record a scenario result with classifications, target losses, and weapon outcomes.
+- [x] Capture completion whether it occurs during an order or after pending engagements resolve.
+- [x] Show the saved result as an after-action summary and keep older saves readable.
+- **Exit:** each completed scenario has a reviewable result that remains part of its campaign save.
+
 ## Future weapon domains (planned)
 
 - Add cyber weapons as a gameplay domain, with disruption effects against sensors and command systems, clear duration and recovery rules, and player-visible attribution.

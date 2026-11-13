@@ -46,7 +46,8 @@ function App() {
 
   const tick = useCallback(async (seconds: number) => {
     const next = await advance(seconds)
-    setState((current) => current ? { ...next, running: current.running } : next)
+    if (next.missionComplete) setCampaign(await campaignStatus())
+    setState((current) => current ? { ...next, running: next.missionComplete ? false : current.running } : next)
   }, [])
 
   useEffect(() => {
@@ -123,6 +124,20 @@ function App() {
 
   if (!state) return <div className="boot-screen"><div className="boot-mark"><Anchor size={22} /></div><span>INITIALIZING TACTICAL SYSTEMS</span><div className="boot-line" /></div>
 
+  const scenarioResult = campaign?.progress.scenarioResults?.find((result) => result.scenarioId === state.scenarioId) ?? (state.missionComplete ? {
+    scenarioId: state.scenarioId,
+    completedAtSeconds: state.elapsedSeconds,
+    contactsClassified: state.contacts.filter((contact) => contact.identified).length,
+    targetsDestroyed: state.contacts.filter((contact) => contact.destroyed).length,
+    engagementsLaunched: state.engagements.length,
+    hits: state.engagements.filter((engagement) => engagement.status === 'hit').length,
+    damaged: state.engagements.filter((engagement) => engagement.status === 'damaged').length,
+    intercepted: state.engagements.filter((engagement) => engagement.status === 'intercepted').length,
+    misses: state.engagements.filter((engagement) => engagement.status === 'miss').length,
+    aborted: state.engagements.filter((engagement) => engagement.status === 'aborted').length,
+  } : null)
+  const campaignComplete = Boolean(campaign?.progress.scenarioOrder.length && campaign.progress.scenarioOrder.every((id) => campaign.progress.completedScenarios.includes(id)))
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -167,7 +182,7 @@ function App() {
         <section className="mission-stage">
           <div className="stage-toolbar"><div className="stage-title"><span className="live-indicator" /><span>TACTICAL PICTURE</span><span className="stage-separator">/</span><span className="stage-muted">NORTH ATLANTIC</span></div><div className="toolbar-actions"><button className="toolbar-button" onClick={() => setTab('sensors')}><Search size={15} /><span>Find</span><kbd>⌘ K</kbd></button><button className="toolbar-button" onClick={() => setShowLayers(!showLayers)}><Layers3 size={15} /><span>Layers</span></button><button className="square-button" aria-label="Expand view"><Maximize2 size={15} /></button></div></div>
           <div className="scene-wrap">
-            {state.missionComplete && <div className="mission-complete-banner"><div className="complete-mark"><Shield size={17} /></div><div><span className="eyebrow">SCENARIO COMPLETE</span><strong>Contact picture established</strong><small>Task Group North classified the required contacts.</small></div><button onClick={() => void reloadScenario()}>REPLAY SCENARIO</button></div>}
+            {state.missionComplete && <div className="mission-complete-banner"><div className="complete-mark"><Shield size={17} /></div><div className="debrief-heading"><span className="eyebrow">AFTER-ACTION REPORT</span><strong>{campaignComplete ? 'Campaign complete' : 'Scenario complete'}</strong><small>{state.missionTitle} · {timeLabel(scenarioResult?.completedAtSeconds ?? state.elapsedSeconds)} ZULU</small></div>{scenarioResult && <div className="debrief-stats"><span><strong>{scenarioResult.contactsClassified}</strong> IDENTIFIED</span><span><strong>{scenarioResult.targetsDestroyed}</strong> DESTROYED</span><span><strong>{scenarioResult.hits}</strong> HITS</span><span><strong>{scenarioResult.damaged}</strong> DAMAGED</span><span><strong>{scenarioResult.intercepted}</strong> INTERCEPTED</span><span><strong>{scenarioResult.misses + scenarioResult.aborted}</strong> MISSED</span></div>}<button onClick={() => void reloadScenario()}>REPLAY SCENARIO</button></div>}
             <TacticalScene units={state.units} contacts={state.contacts} engagements={state.engagements} elapsedSeconds={state.elapsedSeconds} selectedId={selectedId} onSelect={setSelectedId} />
             <div className="map-vignette" />
             <div className="map-coordinates top-left"><span>64° 12′ 08″ N</span><span>002° 41′ 33″ W</span></div>

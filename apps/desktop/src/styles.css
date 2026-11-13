@@ -153,9 +153,13 @@ h1,h2 { margin: 5px 0 0; font: 600 19px Manrope, sans-serif; color: #e0e9e5; let
 .track-age.stale { color: #d19b72; }
 .event-dot.mint { background: #83d0ad; }
 
-.mission-complete-banner { position: absolute; z-index: 4; top: 18px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 32px)); display: flex; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid rgba(123,211,183,.32); border-radius: 6px; background: rgba(12,28,25,.94); box-shadow: 0 10px 35px rgba(0,0,0,.28); backdrop-filter: blur(12px); }
+.mission-complete-banner { position: absolute; z-index: 4; top: 18px; left: 50%; transform: translateX(-50%); width: min(620px, calc(100% - 32px)); display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px 11px; padding: 11px 12px; border: 1px solid rgba(123,211,183,.32); border-radius: 6px; background: rgba(12,28,25,.94); box-shadow: 0 10px 35px rgba(0,0,0,.28); backdrop-filter: blur(12px); }
 .complete-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 5px; background: rgba(123,211,183,.12); color: #91d9b8; flex: 0 0 30px; }
 .mission-complete-banner > div:nth-child(2) { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.mission-complete-banner > button { grid-column: 3; grid-row: 1; }
+.debrief-stats { grid-column: 2 / 4; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; padding-top: 7px; border-top: 1px solid rgba(123,211,183,.12); }
+.debrief-stats span { display: flex; align-items: baseline; gap: 5px; color: #819891; font: 7px var(--mono); white-space: nowrap; }
+.debrief-stats strong { color: #d3e4dc; font-size: 9px; }
 .mission-complete-banner .eyebrow { font-size: 7px; color: #83c8a8; }
 .mission-complete-banner strong { font-size: 10px; color: #d8e7de; }
 .mission-complete-banner small { font-size: 8px; color: #839b90; }

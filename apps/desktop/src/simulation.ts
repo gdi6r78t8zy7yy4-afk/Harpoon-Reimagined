@@ -56,6 +56,7 @@ const defaultCampaign = (): CampaignProgress => ({
   scenarioOrder: campaignDefinition.scenarios,
   activeScenarioId: campaignDefinition.scenarios[0] ?? scenario.id,
   completedScenarios: [],
+  scenarioResults: [],
 })
 
 type BrowserSave = { saveVersion: number; savedAt: number; campaign: CampaignProgress; settings?: CampaignSettings; simulation: SimulationState }
@@ -113,6 +114,7 @@ function normalizeBrowserContacts(state: SimulationState) {
 }
 normalizeBrowserContacts(browserState)
 let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
+if (!Array.isArray(browserCampaign.scenarioResults)) browserCampaign.scenarioResults = []
 let browserSavedAt: number | null = loadedBrowserSave?.savedAt ?? null
 let browserSettings: CampaignSettings = loadedBrowserSave?.settings ?? { timeScale: 5, layersVisible: true }
 
@@ -382,6 +384,22 @@ function updateMissionCompletion() {
   browserState.missionComplete = true
   browserState.running = false
   if (!browserCampaign.completedScenarios.includes(browserState.scenarioId)) browserCampaign.completedScenarios.push(browserState.scenarioId)
+  const countStatus = (status: SimulationState['engagements'][number]['status']) => browserState.engagements.filter((engagement) => engagement.status === status).length
+  const result = {
+    scenarioId: browserState.scenarioId,
+    completedAtSeconds: browserState.elapsedSeconds,
+    contactsClassified: browserState.contacts.filter((contact) => contact.identified).length,
+    targetsDestroyed: browserState.contacts.filter((contact) => contact.destroyed).length,
+    engagementsLaunched: browserState.engagements.length,
+    hits: countStatus('hit'),
+    damaged: countStatus('damaged'),
+    intercepted: countStatus('intercepted'),
+    misses: countStatus('miss'),
+    aborted: countStatus('aborted'),
+  }
+  const existingResult = browserCampaign.scenarioResults.findIndex((item) => item.scenarioId === result.scenarioId)
+  if (existingResult >= 0) browserCampaign.scenarioResults[existingResult] = result
+  else browserCampaign.scenarioResults.push(result)
   addEvent('Mission complete: contact picture established', 'MISSION CONTROL')
 }
 

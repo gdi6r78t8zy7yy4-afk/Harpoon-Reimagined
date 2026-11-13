@@ -130,6 +130,20 @@ export type CampaignProgress = {
   scenarioOrder: string[]
   activeScenarioId: string
   completedScenarios: string[]
+  scenarioResults: ScenarioResult[]
+}
+
+export type ScenarioResult = {
+  scenarioId: string
+  completedAtSeconds: number
+  contactsClassified: number
+  targetsDestroyed: number
+  engagementsLaunched: number
+  hits: number
+  damaged: number
+  intercepted: number
+  misses: number
+  aborted: number
 }
 
 export type CampaignSettings = {

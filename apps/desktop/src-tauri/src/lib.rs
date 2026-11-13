@@ -50,6 +50,23 @@ struct CampaignProgress {
     scenario_order: Vec<String>,
     active_scenario_id: String,
     completed_scenarios: Vec<String>,
+    #[serde(default)]
+    scenario_results: Vec<ScenarioResult>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioResult {
+    scenario_id: String,
+    completed_at_seconds: u64,
+    contacts_classified: u16,
+    targets_destroyed: u16,
+    engagements_launched: u16,
+    hits: u16,
+    damaged: u16,
+    intercepted: u16,
+    misses: u16,
+    aborted: u16,
 }
 
 impl Default for CampaignProgress {
@@ -63,7 +80,62 @@ impl Default for CampaignProgress {
             scenario_order: definition.scenarios,
             active_scenario_id: STARTER_SCENARIO_ID.into(),
             completed_scenarios: Vec::new(),
+            scenario_results: Vec::new(),
         }
+    }
+}
+
+fn record_scenario_result(progress: &mut CampaignProgress, simulation: &SimulationState) {
+    if !simulation.mission_complete {
+        return;
+    }
+    if !progress
+        .completed_scenarios
+        .contains(&simulation.scenario_id)
+    {
+        progress
+            .completed_scenarios
+            .push(simulation.scenario_id.clone());
+    }
+
+    let count_status = |status: &str| {
+        simulation
+            .engagements
+            .iter()
+            .filter(|engagement| engagement.status == status)
+            .count()
+            .min(u16::MAX as usize) as u16
+    };
+    let result = ScenarioResult {
+        scenario_id: simulation.scenario_id.clone(),
+        completed_at_seconds: simulation.elapsed_seconds,
+        contacts_classified: simulation
+            .contacts
+            .iter()
+            .filter(|contact| contact.identified)
+            .count()
+            .min(u16::MAX as usize) as u16,
+        targets_destroyed: simulation
+            .contacts
+            .iter()
+            .filter(|contact| contact.destroyed)
+            .count()
+            .min(u16::MAX as usize) as u16,
+        engagements_launched: simulation.engagements.len().min(u16::MAX as usize) as u16,
+        hits: count_status("hit"),
+        damaged: count_status("damaged"),
+        intercepted: count_status("intercepted"),
+        misses: count_status("miss"),
+        aborted: count_status("aborted"),
+    };
+    if let Some(existing) = progress
+        .scenario_results
+        .iter_mut()
+        .find(|existing| existing.scenario_id == result.scenario_id)
+    {
+        *existing = result;
+    } else {
+        progress.scenario_results.push(result);
     }
 }
 
@@ -321,6 +393,13 @@ fn advance_simulation(seconds: u64, state: State<'_, AppState>) -> Result<Simula
         .lock()
         .map_err(|_| "Simulation state is unavailable".to_string())?;
     current.advance(seconds);
+    if current.mission_complete {
+        let mut progress = state
+            .campaign
+            .lock()
+            .map_err(|_| "Campaign progress is unavailable".to_string())?;
+        record_scenario_result(&mut progress, &current);
+    }
     Ok(current.clone())
 }
 
@@ -368,11 +447,7 @@ fn classify_contact(
             .campaign
             .lock()
             .map_err(|_| "Campaign progress is unavailable".to_string())?;
-        if !progress.completed_scenarios.contains(&current.scenario_id) {
-            progress
-                .completed_scenarios
-                .push(current.scenario_id.clone());
-        }
+        record_scenario_result(&mut progress, &current);
     }
     Ok(current.clone())
 }
@@ -494,11 +569,82 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        initialize_database, now_millis, read_campaign_save, CampaignProgress, CampaignSave,
-        CampaignSettings, SAVE_VERSION,
+        initialize_database, now_millis, read_campaign_save, record_scenario_result,
+        CampaignProgress, CampaignSave, CampaignSettings, ScenarioResult, SAVE_VERSION,
     };
-    use harpoon_simulation_core::SimulationState;
+    use harpoon_simulation_core::{Engagement, SimulationState};
     use rusqlite::params;
+
+    #[test]
+    fn scenario_result_records_outcomes_once_and_updates_replays() {
+        let mut simulation = SimulationState::default();
+        simulation.mission_complete = true;
+        simulation.elapsed_seconds = 12_345;
+        simulation.contacts[0].identified = true;
+        simulation.contacts[1].destroyed = true;
+        simulation.engagements = ["hit", "damaged", "intercepted", "miss", "aborted"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, status)| Engagement {
+                id: index as u64 + 1,
+                elapsed_seconds: 100,
+                impact_at_seconds: 200,
+                unit_id: "ddg-01".into(),
+                unit_name: "USS ARLEIGH BURKE".into(),
+                weapon_id: format!("weapon-{index}"),
+                weapon_name: format!("Weapon {index}"),
+                contact_id: "c-101".into(),
+                contact_label: "Hostile surface".into(),
+                hit_chance_percent: 80,
+                damage_percent: 50,
+                damage_applied_percent: 50,
+                intercepted_by: None,
+                status: status.into(),
+                hit: status == "hit" || status == "damaged",
+            })
+            .collect();
+        let mut campaign = CampaignProgress::default();
+
+        record_scenario_result(&mut campaign, &simulation);
+        record_scenario_result(&mut campaign, &simulation);
+
+        assert_eq!(
+            campaign.completed_scenarios,
+            [simulation.scenario_id.clone()]
+        );
+        assert_eq!(campaign.scenario_results.len(), 1);
+        let result = &campaign.scenario_results[0];
+        assert_eq!(result.completed_at_seconds, 12_345);
+        assert_eq!(result.contacts_classified, 1);
+        assert_eq!(result.targets_destroyed, 1);
+        assert_eq!(result.engagements_launched, 5);
+        assert_eq!(result.hits, 1);
+        assert_eq!(result.damaged, 1);
+        assert_eq!(result.intercepted, 1);
+        assert_eq!(result.misses, 1);
+        assert_eq!(result.aborted, 1);
+
+        simulation.elapsed_seconds += 60;
+        record_scenario_result(&mut campaign, &simulation);
+        assert_eq!(campaign.completed_scenarios.len(), 1);
+        assert_eq!(campaign.scenario_results.len(), 1);
+        assert_eq!(campaign.scenario_results[0].completed_at_seconds, 12_405);
+    }
+
+    #[test]
+    fn older_campaign_progress_defaults_to_no_scenario_results() {
+        let legacy = serde_json::json!({
+            "campaignId": "north-atlantic-patrol",
+            "title": "Northern Watch",
+            "description": "Legacy save",
+            "scenarioOrder": ["north-atlantic-intercept"],
+            "activeScenarioId": "north-atlantic-intercept",
+            "completedScenarios": []
+        });
+        let progress: CampaignProgress =
+            serde_json::from_value(legacy).expect("legacy campaign progress loads");
+        assert!(progress.scenario_results.is_empty());
+    }
 
     #[test]
     fn sqlite_round_trip_preserves_campaign_simulation_and_settings() {
@@ -512,6 +658,18 @@ mod tests {
 
         let mut campaign = CampaignProgress::default();
         campaign.completed_scenarios.push("intro".into());
+        campaign.scenario_results.push(ScenarioResult {
+            scenario_id: "intro".into(),
+            completed_at_seconds: 1_800,
+            contacts_classified: 2,
+            targets_destroyed: 1,
+            engagements_launched: 3,
+            hits: 1,
+            damaged: 1,
+            intercepted: 1,
+            misses: 0,
+            aborted: 0,
+        });
         let settings = CampaignSettings {
             time_scale: 15,
             layers_visible: false,
@@ -542,6 +700,9 @@ mod tests {
             restored.campaign.completed_scenarios,
             campaign.completed_scenarios
         );
+        assert_eq!(restored.campaign.scenario_results.len(), 1);
+        assert_eq!(restored.campaign.scenario_results[0].scenario_id, "intro");
+        assert_eq!(restored.campaign.scenario_results[0].intercepted, 1);
         assert_eq!(restored.settings.time_scale, 15);
         assert!(!restored.settings.layers_visible);
         assert_eq!(restored.simulation.tick, simulation.tick);
