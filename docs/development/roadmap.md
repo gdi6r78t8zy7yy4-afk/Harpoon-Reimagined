@@ -68,6 +68,13 @@ Follow-up work can improve multi-sensor report fusion and provide richer uncerta
 - [x] Apply graduated damage until a target is disabled or destroyed.
 - **Exit:** engagements progress from a legal launch through impact and produce a persistent, reviewable outcome.
 
+## M8 — 3D combat visualization (in progress)
+
+- [x] Render in-flight weapon tracks and moving projectile markers in the tactical scene.
+- [ ] Show clear impact, interception, and damage feedback in the 3D view.
+- [ ] Keep engagement visuals synchronized with simulation time and saved sessions.
+- **Exit:** players can follow each active engagement from launch through its resolved outcome in the tactical view.
+
 ## Ongoing quality
 
 Keep simulation behavior testable, preserve save compatibility intentionally, profile before optimizing, and document changes to foundational decisions.

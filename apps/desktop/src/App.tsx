@@ -168,7 +168,7 @@ function App() {
           <div className="stage-toolbar"><div className="stage-title"><span className="live-indicator" /><span>TACTICAL PICTURE</span><span className="stage-separator">/</span><span className="stage-muted">NORTH ATLANTIC</span></div><div className="toolbar-actions"><button className="toolbar-button" onClick={() => setTab('sensors')}><Search size={15} /><span>Find</span><kbd>⌘ K</kbd></button><button className="toolbar-button" onClick={() => setShowLayers(!showLayers)}><Layers3 size={15} /><span>Layers</span></button><button className="square-button" aria-label="Expand view"><Maximize2 size={15} /></button></div></div>
           <div className="scene-wrap">
             {state.missionComplete && <div className="mission-complete-banner"><div className="complete-mark"><Shield size={17} /></div><div><span className="eyebrow">SCENARIO COMPLETE</span><strong>Contact picture established</strong><small>Task Group North classified the required contacts.</small></div><button onClick={() => void reloadScenario()}>REPLAY SCENARIO</button></div>}
-            <TacticalScene units={state.units} contacts={state.contacts} selectedId={selectedId} onSelect={setSelectedId} />
+            <TacticalScene units={state.units} contacts={state.contacts} engagements={state.engagements} elapsedSeconds={state.elapsedSeconds} selectedId={selectedId} onSelect={setSelectedId} />
             <div className="map-vignette" />
             <div className="map-coordinates top-left"><span>64° 12′ 08″ N</span><span>002° 41′ 33″ W</span></div>
             <div className="map-coordinates top-right"><span>THEATRE / GIUK GAP</span><span className="coord-muted">NATO SEA AREA 4A</span></div>

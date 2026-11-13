@@ -9,9 +9,9 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Engine } from '@babylonjs/core/Engines/engine'
 import { Scene } from '@babylonjs/core/scene'
-import type { Contact, Unit } from '../types'
+import type { Contact, Engagement, Unit } from '../types'
 
-type Props = { units: Unit[]; contacts: Contact[]; selectedId: string; onSelect: (id: string) => void }
+type Props = { units: Unit[]; contacts: Contact[]; engagements: Engagement[]; elapsedSeconds: number; selectedId: string; onSelect: (id: string) => void }
 
 function ship(scene: Scene, unit: Unit, selected: boolean) {
   const group = new Mesh(`unit-${unit.id}`, scene)
@@ -52,7 +52,7 @@ function contactMarker(scene: Scene, contact: Contact, selected: boolean) {
   return marker
 }
 
-export function TacticalScene({ units, contacts, selectedId, onSelect }: Props) {
+export function TacticalScene({ units, contacts, engagements, elapsedSeconds, selectedId, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const selectRef = useRef(onSelect)
   const sceneRef = useRef<Scene | null>(null)
@@ -149,7 +149,32 @@ export function TacticalScene({ units, contacts, selectedId, onSelect }: Props) 
       const material = marker.material as StandardMaterial | null
       if (material) material.emissiveColor = contact.id === selectedId ? color.scale(0.7) : color.scale(0.23)
     }
-  }, [units, contacts, selectedId])
+    for (const mesh of scene.meshes.filter((item) => item.name.startsWith('engagement-track-') || item.name.startsWith('engagement-projectile-'))) {
+      mesh.dispose(false, true)
+    }
+    for (const engagement of engagements) {
+      if (engagement.status !== 'in_flight') continue
+      const source = units.find((unit) => unit.id === engagement.unitId)
+      const target = contacts.find((contact) => contact.id === engagement.contactId)
+      if (!source || !target) continue
+      const flightDuration = Math.max(1, engagement.impactAtSeconds - engagement.elapsedSeconds)
+      const progress = Math.max(0, Math.min(1, (elapsedSeconds - engagement.elapsedSeconds) / flightDuration))
+      const start = new Vector3(source.x, 0.2, source.z)
+      const destination = new Vector3(target.x, 0.2, target.z)
+      const position = Vector3.Lerp(start, destination, progress)
+      const trail = MeshBuilder.CreateLines(`engagement-track-${engagement.id}`, { points: [start, position] }, scene)
+      trail.color = new Color3(0.3, 0.95, 0.78)
+      trail.alpha = 0.9
+      trail.isPickable = false
+      const projectile = MeshBuilder.CreateSphere(`engagement-projectile-${engagement.id}`, { diameter: 0.25, segments: 8 }, scene)
+      projectile.position.copyFrom(position)
+      projectile.isPickable = false
+      const projectileMaterial = new StandardMaterial(`engagement-projectile-material-${engagement.id}`, scene)
+      projectileMaterial.diffuseColor = new Color3(0.28, 0.94, 0.76)
+      projectileMaterial.emissiveColor = new Color3(0.16, 0.72, 0.56)
+      projectile.material = projectileMaterial
+    }
+  }, [units, contacts, engagements, elapsedSeconds, selectedId])
 
   return <canvas ref={canvasRef} className="tactical-canvas" aria-label="Interactive 3D tactical map" />
 }
