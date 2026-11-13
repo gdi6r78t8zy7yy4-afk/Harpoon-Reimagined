@@ -23,6 +23,21 @@ pub struct ScenarioUnit {
     pub health: u8,
     #[serde(default)]
     pub sensors: Vec<SensorDefinition>,
+    #[serde(default)]
+    pub weapons: Vec<WeaponDefinition>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeaponDefinition {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub range_nm: f32,
+    pub domains: Vec<String>,
+    pub ammunition: u16,
+    pub hit_chance_percent: u8,
+    pub speed_knots: u16,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -151,6 +166,34 @@ impl ScenarioDefinition {
                         .any(|domain| !matches!(domain.as_str(), "surface" | "air" | "subsurface"))
                 {
                     return invalid("Sensor kind, range, or domain is outside supported limits");
+                }
+            }
+            let mut weapon_ids = HashSet::new();
+            for weapon in &unit.weapons {
+                if weapon.id.trim().is_empty()
+                    || weapon.name.trim().is_empty()
+                    || !weapon_ids.insert(weapon.id.as_str())
+                {
+                    return invalid(
+                        "Weapon ids and names must be non-empty and ids unique per unit",
+                    );
+                }
+                if !matches!(weapon.kind.as_str(), "missile" | "torpedo" | "gun")
+                    || !weapon.range_nm.is_finite()
+                    || weapon.range_nm <= 0.0
+                    || weapon.range_nm > 1000.0
+                    || weapon.domains.is_empty()
+                    || weapon
+                        .domains
+                        .iter()
+                        .any(|domain| !matches!(domain.as_str(), "surface" | "air" | "subsurface"))
+                    || weapon.ammunition == 0
+                    || weapon.hit_chance_percent == 0
+                    || weapon.hit_chance_percent > 100
+                    || weapon.speed_knots == 0
+                    || weapon.speed_knots > 5000
+                {
+                    return invalid("Weapon type, range, ammunition, accuracy, or domain is outside supported limits");
                 }
             }
         }
@@ -287,6 +330,19 @@ mod tests {
         let invalid_range = SCENARIO.replace("\"rangeNm\": 120", "\"rangeNm\": 0");
         let error = ScenarioDefinition::parse(&invalid_range).unwrap_err();
         assert!(error.to_string().contains("Sensor kind, range, or domain"));
+    }
+
+    #[test]
+    fn parses_weapon_loadouts_and_rejects_invalid_accuracy() {
+        let scenario = ScenarioDefinition::parse(SCENARIO).expect("weapon loadouts are valid");
+        assert_eq!(scenario.units[0].weapons.len(), 2);
+
+        let invalid_accuracy =
+            SCENARIO.replace("\"hitChancePercent\": 78", "\"hitChancePercent\": 101");
+        let error = ScenarioDefinition::parse(&invalid_accuracy).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Weapon type, range, ammunition, accuracy, or domain"));
     }
 
     #[test]

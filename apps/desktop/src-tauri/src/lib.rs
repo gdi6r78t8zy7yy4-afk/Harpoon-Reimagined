@@ -406,6 +406,21 @@ fn correlate_contacts(
     Ok(current.clone())
 }
 
+#[tauri::command]
+fn fire_weapon(
+    unit_id: String,
+    weapon_id: String,
+    contact_id: String,
+    state: State<'_, AppState>,
+) -> Result<SimulationState, String> {
+    let mut current = state
+        .simulation
+        .lock()
+        .map_err(|_| "Simulation state is unavailable".to_string())?;
+    current.fire_weapon(&unit_id, &weapon_id, &contact_id)?;
+    Ok(current.clone())
+}
+
 fn initialize_database(
     path: PathBuf,
 ) -> Result<(Connection, Option<CampaignSave>), Box<dyn std::error::Error>> {
@@ -469,7 +484,8 @@ pub fn run() {
             issue_speed,
             classify_contact,
             sensor_sweep,
-            correlate_contacts
+            correlate_contacts,
+            fire_weapon
         ])
         .run(tauri::generate_context!())
         .expect("error while running Harpoon Reimagined");

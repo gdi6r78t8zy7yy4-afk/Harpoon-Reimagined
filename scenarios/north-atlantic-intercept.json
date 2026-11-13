@@ -18,6 +18,10 @@
       "sensors": [
         { "id": "spyd-1", "name": "SPY-6 air search", "kind": "radar", "rangeNm": 120, "domains": ["surface", "air"] },
         { "id": "sps-1", "name": "SPS-73 surface search", "kind": "radar", "rangeNm": 55, "domains": ["surface"] }
+      ],
+      "weapons": [
+        { "id": "sm-6", "name": "SM-6", "kind": "missile", "rangeNm": 120, "domains": ["air"], "ammunition": 8, "hitChancePercent": 78, "speedKnots": 2000 },
+        { "id": "harpoon", "name": "Harpoon", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 72, "speedKnots": 550 }
       ]
     },
     {
@@ -33,6 +37,9 @@
       "sensors": [
         { "id": "bqq-1", "name": "BQQ-10 passive sonar", "kind": "sonar", "rangeNm": 45, "domains": ["subsurface"] },
         { "id": "bqq-2", "name": "BQQ-10 active sonar", "kind": "sonar", "rangeNm": 90, "domains": ["subsurface"] }
+      ],
+      "weapons": [
+        { "id": "mk-48", "name": "Mk 48 ADCAP", "kind": "torpedo", "rangeNm": 25, "domains": ["surface", "subsurface"], "ammunition": 6, "hitChancePercent": 70, "speedKnots": 55 }
       ]
     },
     {
@@ -48,6 +55,10 @@
       "sensors": [
         { "id": "ap-1", "name": "APAR air search", "kind": "radar", "rangeNm": 95, "domains": ["surface", "air"] },
         { "id": "hull-sonar", "name": "Hull sonar", "kind": "sonar", "rangeNm": 30, "domains": ["subsurface"] }
+      ],
+      "weapons": [
+        { "id": "nsm", "name": "Naval Strike Missile", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 74, "speedKnots": 550 },
+        { "id": "essm", "name": "ESSM", "kind": "missile", "rangeNm": 35, "domains": ["air"], "ammunition": 16, "hitChancePercent": 80, "speedKnots": 2000 }
       ]
     }
   ],

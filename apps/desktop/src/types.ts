@@ -10,6 +10,7 @@ export type Unit = {
   speedKnots: number
   health: number
   sensors: Sensor[]
+  weapons: Weapon[]
 }
 
 export type Sensor = {
@@ -18,6 +19,17 @@ export type Sensor = {
   kind: 'radar' | 'sonar' | 'esm'
   rangeNm: number
   domains: Array<'surface' | 'air' | 'subsurface'>
+}
+
+export type Weapon = {
+  id: string
+  name: string
+  kind: 'missile' | 'torpedo' | 'gun'
+  rangeNm: number
+  domains: Array<'surface' | 'air' | 'subsurface'>
+  ammunition: number
+  hitChancePercent: number
+  speedKnots: number
 }
 
 export type Contact = {
@@ -40,6 +52,7 @@ export type Contact = {
   reportCount: number
   reportHistory: TrackReport[]
   correlatedContactIds: string[]
+  destroyed: boolean
 }
 
 export type TrackReport = {
@@ -77,8 +90,24 @@ export type SimulationState = {
   missionComplete: boolean
   units: Unit[]
   contacts: Contact[]
+  engagements: Engagement[]
   objectives: Objective[]
   events: SimulationEvent[]
+}
+
+export type Engagement = {
+  id: number
+  elapsedSeconds: number
+  impactAtSeconds: number
+  unitId: string
+  unitName: string
+  weaponId: string
+  weaponName: string
+  contactId: string
+  contactLabel: string
+  hitChancePercent: number
+  status: 'in_flight' | 'hit' | 'miss' | 'aborted'
+  hit: boolean
 }
 
 export type CampaignProgress = {

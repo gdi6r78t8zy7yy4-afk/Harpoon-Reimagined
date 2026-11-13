@@ -58,6 +58,15 @@ Follow-up work can improve multi-sensor report fusion and provide richer uncerta
 - [x] Let operators correlate and separate tracks, preserving the relationship in saves.
 - **Exit:** reports from different sensor types improve the same saved track and expose how precise its position estimate is.
 
+## M7 — Weapon employment (in progress)
+
+- [x] Define scenario-loaded weapon stores with domain, range, ammunition, and base hit chance.
+- [x] Require an identified hostile contact and validate estimated range and target domain before firing.
+- [x] Consume ammunition, resolve a repeatable hit/miss outcome, and persist engagement records.
+- [x] Model time to impact, resolve hits and misses during simulation advance, and show in-flight engagements.
+- [ ] Add defensive responses, weapon interception, and graduated damage.
+- **Exit:** engagements progress from a legal launch through impact and produce a persistent, reviewable outcome.
+
 ## Ongoing quality
 
 Keep simulation behavior testable, preserve save compatibility intentionally, profile before optimizing, and document changes to foundational decisions.

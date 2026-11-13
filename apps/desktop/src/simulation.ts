@@ -8,7 +8,7 @@ declare global {
 }
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
-type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds'> & { position: { x: number; z: number } }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed'> & { position: { x: number; z: number } }
 
 const initialRangeUncertainty = (confidence: number) => 1 + (100 - confidence) * 0.12
 const initialBearingUncertainty = (confidence: number) => 2 + (100 - confidence) * 0.5
@@ -36,7 +36,8 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [] })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false })),
+    engagements: [],
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
       { id: 1, elapsedSeconds: scenario.startTimeSeconds, message: 'Unidentified surface contact detected', source: 'USS ARLEIGH BURKE' },
@@ -74,6 +75,9 @@ const loadedBrowserSave = readBrowserSave()
 let browserState = loadedBrowserSave?.simulation ?? createBrowserState()
 browserState.running = false
 function normalizeBrowserContacts(state: SimulationState) {
+  for (const unit of state.units) {
+    if (!Array.isArray(unit.weapons)) unit.weapons = []
+  }
   for (const contact of state.contacts) {
     if (!Number.isFinite(contact.lastReportedSeconds) || contact.lastReportedSeconds === 0) {
       contact.lastReportedSeconds = state.elapsedSeconds
@@ -90,7 +94,9 @@ function normalizeBrowserContacts(state: SimulationState) {
     }
     if (!Array.isArray(contact.reportHistory)) contact.reportHistory = []
     if (!Array.isArray(contact.correlatedContactIds)) contact.correlatedContactIds = []
+    if (typeof contact.destroyed !== 'boolean') contact.destroyed = false
   }
+  if (!Array.isArray(state.engagements)) state.engagements = []
 }
 normalizeBrowserContacts(browserState)
 let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
@@ -172,6 +178,26 @@ export async function advance(seconds = 60) {
     contact.bearingUncertaintyDeg = Math.min(180, contact.bearingUncertaintyAtLastReport + ageSteps)
     if (previousAge < 1800 && trackAge >= 1800) addEvent(`Track is stale: ${contact.label}`, 'SENSORS')
   }
+  for (const engagement of browserState.engagements) {
+    if (engagement.status !== 'in_flight' || engagement.impactAtSeconds > browserState.elapsedSeconds) continue
+    const target = browserState.contacts.find((item) => item.id === engagement.contactId)
+    if (engagement.hit && target && !target.destroyed) {
+      target.destroyed = true
+      engagement.status = 'hit'
+    } else if (engagement.hit) {
+      engagement.hit = false
+      engagement.status = 'aborted'
+    } else {
+      engagement.status = 'miss'
+    }
+    const message = engagement.status === 'hit'
+      ? `${engagement.weaponName} hit ${engagement.contactLabel}`
+      : engagement.status === 'miss'
+        ? `${engagement.weaponName} missed ${engagement.contactLabel}`
+        : `${engagement.weaponName} impact aborted; ${engagement.contactLabel} is no longer active`
+    addEvent(message, 'WEAPONS CONTROL')
+  }
+  updateMissionCompletion()
   return structuredClone(browserState)
 }
 
@@ -260,12 +286,7 @@ export async function classifyContact(contactId: string, identity: 'hostile' | '
     objective.completed = objective.progress >= objective.required
   }
   addEvent(`Contact classified: ${contact.label}`, 'COMMAND')
-  if (browserState.objectives.every((objective) => objective.completed)) {
-    browserState.missionComplete = true
-    browserState.running = false
-    if (!browserCampaign.completedScenarios.includes(browserState.scenarioId)) browserCampaign.completedScenarios.push(browserState.scenarioId)
-    addEvent('Mission complete: contact picture established', 'MISSION CONTROL')
-  }
+  updateMissionCompletion()
   return structuredClone(browserState)
 }
 
@@ -285,6 +306,48 @@ export async function correlateContacts(contactId: string, otherContactId: strin
   updatePeer(other, contactId)
   addEvent(`Tracks ${correlated ? 'correlated' : 'separated'}: ${contact.label} / ${other.label}`, 'COMMAND')
   return structuredClone(browserState)
+}
+
+export async function fireWeapon(unitId: string, weaponId: string, contactId: string) {
+  if (desktop()) return invoke<SimulationState>('fire_weapon', { unitId, weaponId, contactId })
+  if (browserState.missionComplete) throw new Error('Scenario complete; reload it before engaging targets')
+  const unit = browserState.units.find((item) => item.id === unitId)
+  if (!unit) throw new Error('Unit not found')
+  if (unit.side !== 'friendly') throw new Error('Only friendly units can engage targets')
+  const weapon = unit.weapons.find((item) => item.id === weaponId)
+  if (!weapon) throw new Error('Weapon not found on this unit')
+  const contact = browserState.contacts.find((item) => item.id === contactId)
+  if (!contact) throw new Error('Contact not found')
+  if (contact.destroyed) throw new Error('This contact has already been destroyed')
+  if (!contact.identified || contact.classification !== 'Hostile platform') throw new Error('Only identified hostile contacts can be engaged')
+  if (!weapon.domains.includes(contact.domain)) throw new Error("This weapon cannot engage the contact's domain")
+  if (contact.rangeNm > weapon.rangeNm) throw new Error("Contact is outside this weapon's estimated range")
+  if (weapon.ammunition <= 0) throw new Error('No ammunition remains for this weapon')
+  const unitIndex = browserState.units.findIndex((item) => item.id === unitId)
+  const weaponIndex = browserState.units[unitIndex].weapons.findIndex((item) => item.id === weaponId)
+  const confidenceAdjustment = Math.trunc((contact.confidence - 50) / 5)
+  const rangePenalty = Math.round(contact.rangeNm / weapon.rangeNm * 15)
+  const hitChancePercent = Math.max(5, Math.min(95, weapon.hitChancePercent + confidenceAdjustment - rangePenalty))
+  const id = (browserState.engagements.at(-1)?.id ?? 0) + 1
+  const flightSeconds = Math.max(1, Math.ceil(contact.rangeNm / weapon.speedKnots * 3600))
+  const idSalt = [...`${unitId}${weaponId}${contactId}`].reduce((sum, character) => sum + character.charCodeAt(0), 0)
+  const roll = (browserState.elapsedSeconds + browserState.tick * 17 + id * 31 + idSalt) % 100
+  const hit = roll < hitChancePercent
+  browserState.units[unitIndex].weapons[weaponIndex].ammunition -= 1
+  browserState.engagements.push({ id, elapsedSeconds: browserState.elapsedSeconds, impactAtSeconds: browserState.elapsedSeconds + flightSeconds, unitId, unitName: unit.name, weaponId, weaponName: weapon.name, contactId, contactLabel: contact.label, hitChancePercent, status: 'in_flight', hit })
+  browserState.engagements = browserState.engagements.slice(-50)
+  addEvent(`${weapon.name} launched at ${contact.label} (${hitChancePercent}% solution)`, unit.name)
+  return structuredClone(browserState)
+}
+
+function updateMissionCompletion() {
+  if (browserState.missionComplete
+    || !browserState.objectives.every((objective) => objective.completed)
+    || browserState.engagements.some((engagement) => engagement.status === 'in_flight')) return
+  browserState.missionComplete = true
+  browserState.running = false
+  if (!browserCampaign.completedScenarios.includes(browserState.scenarioId)) browserCampaign.completedScenarios.push(browserState.scenarioId)
+  addEvent('Mission complete: contact picture established', 'MISSION CONTROL')
 }
 
 function addEvent(message: string, source: string) {

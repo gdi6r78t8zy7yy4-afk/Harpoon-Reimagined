@@ -1,4 +1,4 @@
-use harpoon_scenario_format::{ScenarioDefinition, SensorDefinition};
+use harpoon_scenario_format::{ScenarioDefinition, SensorDefinition, WeaponDefinition};
 use serde::{Deserialize, Serialize};
 
 const STARTER_SCENARIO: &str = include_str!("../../../scenarios/north-atlantic-intercept.json");
@@ -17,6 +17,8 @@ pub struct Unit {
     pub speed_knots: u8,
     pub health: u8,
     pub sensors: Vec<SensorDefinition>,
+    #[serde(default)]
+    pub weapons: Vec<WeaponDefinition>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -50,6 +52,8 @@ pub struct Contact {
     pub report_history: Vec<TrackReport>,
     #[serde(default)]
     pub correlated_contact_ids: Vec<String>,
+    #[serde(default)]
+    pub destroyed: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -61,6 +65,23 @@ pub struct TrackReport {
     pub sensor_id: String,
     pub sensor_name: String,
     pub sensor_kind: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Engagement {
+    pub id: u64,
+    pub elapsed_seconds: u64,
+    pub impact_at_seconds: u64,
+    pub unit_id: String,
+    pub unit_name: String,
+    pub weapon_id: String,
+    pub weapon_name: String,
+    pub contact_id: String,
+    pub contact_label: String,
+    pub hit_chance_percent: u8,
+    pub status: String,
+    pub hit: bool,
 }
 
 const MAX_TRACK_REPORT_HISTORY: usize = 20;
@@ -97,6 +118,8 @@ pub struct SimulationState {
     pub mission_complete: bool,
     pub units: Vec<Unit>,
     pub contacts: Vec<Contact>,
+    #[serde(default)]
+    pub engagements: Vec<Engagement>,
     pub objectives: Vec<ObjectiveProgress>,
     pub events: Vec<SimulationEvent>,
 }
@@ -149,6 +172,7 @@ impl SimulationState {
                 speed_knots: unit.speed_knots,
                 health: unit.health,
                 sensors: unit.sensors,
+                weapons: unit.weapons,
             })
             .collect();
         let contacts = scenario
@@ -174,6 +198,7 @@ impl SimulationState {
                 report_count: 1,
                 report_history: Vec::new(),
                 correlated_contact_ids: Vec::new(),
+                destroyed: false,
             })
             .collect();
         let objectives = scenario
@@ -199,6 +224,7 @@ impl SimulationState {
             mission_complete: false,
             units,
             contacts,
+            engagements: Vec::new(),
             objectives,
             events: vec![
                 SimulationEvent {
@@ -279,6 +305,48 @@ impl SimulationState {
         for label in stale_tracks {
             self.push_event(format!("Track is stale: {label}"), "SENSORS".into());
         }
+        let mut impact_events = Vec::new();
+        for engagement in &mut self.engagements {
+            if engagement.status != "in_flight"
+                || engagement.impact_at_seconds > self.elapsed_seconds
+            {
+                continue;
+            }
+            if engagement.hit {
+                if let Some(contact) = self
+                    .contacts
+                    .iter_mut()
+                    .find(|contact| contact.id == engagement.contact_id)
+                {
+                    if contact.destroyed {
+                        engagement.hit = false;
+                        engagement.status = "aborted".into();
+                    } else {
+                        contact.destroyed = true;
+                        engagement.status = "hit".into();
+                    }
+                } else {
+                    engagement.hit = false;
+                    engagement.status = "aborted".into();
+                }
+            } else {
+                engagement.status = "miss".into();
+            }
+            impact_events.push((
+                engagement.weapon_name.clone(),
+                engagement.contact_label.clone(),
+                engagement.status.clone(),
+            ));
+        }
+        for (weapon_name, contact_label, status) in impact_events {
+            let message = match status.as_str() {
+                "hit" => format!("{weapon_name} hit {contact_label}"),
+                "miss" => format!("{weapon_name} missed {contact_label}"),
+                _ => format!("{weapon_name} impact aborted; {contact_label} is no longer active"),
+            };
+            self.push_event(message, "WEAPONS CONTROL".into());
+        }
+        self.maybe_complete_mission();
     }
 
     pub fn issue_course(&mut self, unit_id: &str, heading: u16) -> Result<(), String> {
@@ -458,6 +526,108 @@ impl SimulationState {
         Ok(())
     }
 
+    pub fn fire_weapon(
+        &mut self,
+        unit_id: &str,
+        weapon_id: &str,
+        contact_id: &str,
+    ) -> Result<(), String> {
+        if self.mission_complete {
+            return Err("The scenario is complete; reload it before engaging".into());
+        }
+        let unit_index = self
+            .units
+            .iter()
+            .position(|unit| unit.id == unit_id)
+            .ok_or_else(|| "Unit not found".to_string())?;
+        if self.units[unit_index].side != "friendly" {
+            return Err("Only friendly units can engage targets".into());
+        }
+        let weapon_index = self.units[unit_index]
+            .weapons
+            .iter()
+            .position(|weapon| weapon.id == weapon_id)
+            .ok_or_else(|| "Weapon not found on this unit".to_string())?;
+        let weapon = self.units[unit_index].weapons[weapon_index].clone();
+        let unit_name = self.units[unit_index].name.clone();
+        if weapon.ammunition == 0 {
+            return Err("No ammunition remains for this weapon".into());
+        }
+
+        let contact_index = self
+            .contacts
+            .iter()
+            .position(|contact| contact.id == contact_id)
+            .ok_or_else(|| "Contact not found".to_string())?;
+        let contact = &self.contacts[contact_index];
+        if contact.destroyed {
+            return Err("This contact has already been destroyed".into());
+        }
+        if !contact.identified || contact.classification != "Hostile platform" {
+            return Err("Only identified hostile contacts can be engaged".into());
+        }
+        if !weapon
+            .domains
+            .iter()
+            .any(|domain| domain == &contact.domain)
+        {
+            return Err("This weapon cannot engage the contact's domain".into());
+        }
+        if contact.range_nm > weapon.range_nm {
+            return Err("Contact is outside this weapon's estimated range".into());
+        }
+
+        let contact_label = contact.label.clone();
+        let confidence_adjustment = (i16::from(contact.confidence) - 50) / 5;
+        let range_penalty = ((contact.range_nm / weapon.range_nm) * 15.0).round() as i16;
+        let hit_chance_percent = (i16::from(weapon.hit_chance_percent) + confidence_adjustment
+            - range_penalty)
+            .clamp(5, 95) as u8;
+        let engagement_id = self.engagements.last().map_or(1, |item| item.id + 1);
+        let flight_seconds = (contact.range_nm / f32::from(weapon.speed_knots) * 3600.0)
+            .ceil()
+            .max(1.0) as u64;
+        let id_salt = unit_id
+            .bytes()
+            .chain(weapon_id.bytes())
+            .chain(contact_id.bytes())
+            .fold(0_u64, |sum, byte| sum.wrapping_add(u64::from(byte)));
+        let roll = (self
+            .elapsed_seconds
+            .wrapping_add(self.tick.wrapping_mul(17))
+            .wrapping_add(engagement_id.wrapping_mul(31))
+            .wrapping_add(id_salt))
+            % 100;
+        let hit = roll < u64::from(hit_chance_percent);
+
+        self.units[unit_index].weapons[weapon_index].ammunition -= 1;
+        self.engagements.push(Engagement {
+            id: engagement_id,
+            elapsed_seconds: self.elapsed_seconds,
+            impact_at_seconds: self.elapsed_seconds.saturating_add(flight_seconds),
+            unit_id: unit_id.to_string(),
+            unit_name: unit_name.clone(),
+            weapon_id: weapon_id.to_string(),
+            weapon_name: weapon.name.clone(),
+            contact_id: contact_id.to_string(),
+            contact_label: contact_label.clone(),
+            hit_chance_percent,
+            status: "in_flight".into(),
+            hit,
+        });
+        if self.engagements.len() > 50 {
+            self.engagements.remove(0);
+        }
+        self.push_event(
+            format!(
+                "{} launched at {contact_label} ({hit_chance_percent}% solution)",
+                weapon.name
+            ),
+            unit_name,
+        );
+        Ok(())
+    }
+
     pub fn classify_contact(&mut self, contact_id: &str, identity: &str) -> Result<(), String> {
         if self.mission_complete {
             return Err("The scenario is complete; reload it to classify more contacts".into());
@@ -493,7 +663,17 @@ impl SimulationState {
         let report = contact.label.clone();
         self.update_objectives();
         self.push_event(format!("Contact classified: {report}"), "COMMAND".into());
-        if self.objectives.iter().all(|objective| objective.completed) {
+        self.maybe_complete_mission();
+        Ok(())
+    }
+
+    fn maybe_complete_mission(&mut self) {
+        let objectives_complete = self.objectives.iter().all(|objective| objective.completed);
+        let weapons_resolved = self
+            .engagements
+            .iter()
+            .all(|engagement| engagement.status != "in_flight");
+        if objectives_complete && weapons_resolved && !self.mission_complete {
             self.mission_complete = true;
             self.running = false;
             self.push_event(
@@ -501,7 +681,6 @@ impl SimulationState {
                 "MISSION CONTROL".into(),
             );
         }
-        Ok(())
     }
 
     fn update_objectives(&mut self) {
@@ -659,6 +838,53 @@ mod tests {
         assert!(state
             .correlate_contacts(&first_id, &first_id, true)
             .is_err());
+    }
+
+    #[test]
+    fn weapon_engagement_requires_a_classified_hostile_and_consumes_ammunition() {
+        let mut state = SimulationState::default();
+        assert!(state.fire_weapon("ddg-01", "harpoon", "c-101").is_err());
+
+        state.classify_contact("c-101", "hostile").unwrap();
+        let ammunition_before = state.units[0].weapons[1].ammunition;
+        state.fire_weapon("ddg-01", "harpoon", "c-101").unwrap();
+
+        assert_eq!(state.units[0].weapons[1].ammunition, ammunition_before - 1);
+        assert_eq!(state.engagements.len(), 1);
+        assert_eq!(state.engagements[0].contact_id, "c-101");
+        assert_eq!(state.engagements[0].status, "in_flight");
+        assert!(!state.contacts[0].destroyed);
+        assert!(state.fire_weapon("ddg-01", "sm-6", "c-101").is_err());
+
+        let seconds_until_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_until_impact);
+        assert_eq!(state.contacts[0].destroyed, state.engagements[0].hit);
+        assert_eq!(
+            state.engagements[0].status,
+            if state.engagements[0].hit {
+                "hit"
+            } else {
+                "miss"
+            }
+        );
+    }
+
+    #[test]
+    fn m7_fields_default_when_loading_a_pre_weapon_save() {
+        let mut old_save = serde_json::to_value(SimulationState::default()).unwrap();
+        let object = old_save.as_object_mut().unwrap();
+        object.remove("engagements");
+        for unit in object.get_mut("units").unwrap().as_array_mut().unwrap() {
+            unit.as_object_mut().unwrap().remove("weapons");
+        }
+        for contact in object.get_mut("contacts").unwrap().as_array_mut().unwrap() {
+            contact.as_object_mut().unwrap().remove("destroyed");
+        }
+
+        let restored: SimulationState = serde_json::from_value(old_save).unwrap();
+        assert!(restored.engagements.is_empty());
+        assert!(restored.units.iter().all(|unit| unit.weapons.is_empty()));
+        assert!(restored.contacts.iter().all(|contact| !contact.destroyed));
     }
 
     #[test]
