@@ -44,7 +44,7 @@ function contactMarker(scene: Scene, contact: Contact, selected: boolean) {
   marker.rotation.y = Math.PI / 4
   marker.metadata = { contactId: contact.id }
   const material = new StandardMaterial(`contact-mat-${contact.id}`, scene)
-  const color = contact.domain === 'air' ? new Color3(0.94, 0.69, 0.34) : contact.domain === 'subsurface' ? new Color3(0.63, 0.56, 0.91) : new Color3(0.98, 0.39, 0.31)
+  const color = contact.domain === 'air' ? new Color3(0.94, 0.69, 0.34) : contact.domain === 'subsurface' ? new Color3(0.63, 0.56, 0.91) : contact.domain === 'space' ? new Color3(0.45, 0.72, 0.98) : new Color3(0.98, 0.39, 0.31)
   material.diffuseColor = color
   material.emissiveColor = selected ? color.scale(0.7) : color.scale(0.23)
   material.alpha = 0.9
@@ -161,9 +161,11 @@ export function TacticalScene({ units, contacts, engagements, coastlines, elapse
         contactMarker(scene, contact, contact.id === selectedId)
         continue
       }
-      const color = contact.domain === 'air' ? new Color3(0.94, 0.69, 0.34) : contact.domain === 'subsurface' ? new Color3(0.63, 0.56, 0.91) : new Color3(0.98, 0.39, 0.31)
+      const color = contact.domain === 'air' ? new Color3(0.94, 0.69, 0.34) : contact.domain === 'subsurface' ? new Color3(0.63, 0.56, 0.91) : contact.domain === 'space' ? new Color3(0.45, 0.72, 0.98) : new Color3(0.98, 0.39, 0.31)
       const material = marker.material as StandardMaterial | null
       if (material) material.emissiveColor = contact.id === selectedId ? color.scale(0.7) : color.scale(0.23)
+      // Satellite ground tracks drift across the chart, so markers must follow them.
+      marker.position.set(contact.x, 0.08, contact.z)
     }
     for (const mesh of scene.meshes.filter((item) => item.name.startsWith('engagement-track-') || item.name.startsWith('engagement-projectile-') || item.name.startsWith('engagement-result-'))) {
       mesh.dispose(false, true)
@@ -179,16 +181,18 @@ export function TacticalScene({ units, contacts, engagements, coastlines, elapse
       const destination = new Vector3(target.x, 0.2, target.z)
       const position = Vector3.Lerp(start, destination, progress)
       const isCyber = engagement.weaponKind === 'cyber'
+      const isAsat = engagement.weaponKind === 'asat'
+      const trailColor = isCyber ? new Color3(0.76, 0.55, 0.88) : isAsat ? new Color3(0.45, 0.72, 0.98) : new Color3(0.3, 0.95, 0.78)
       const trail = MeshBuilder.CreateLines(`engagement-track-${engagement.id}`, { points: [start, position] }, scene)
-      trail.color = isCyber ? new Color3(0.76, 0.55, 0.88) : new Color3(0.3, 0.95, 0.78)
+      trail.color = trailColor
       trail.alpha = 0.9
       trail.isPickable = false
       const projectile = MeshBuilder.CreateSphere(`engagement-projectile-${engagement.id}`, { diameter: 0.25, segments: 8 }, scene)
       projectile.position.copyFrom(position)
       projectile.isPickable = false
       const projectileMaterial = new StandardMaterial(`engagement-projectile-material-${engagement.id}`, scene)
-      projectileMaterial.diffuseColor = isCyber ? new Color3(0.71, 0.49, 0.86) : new Color3(0.28, 0.94, 0.76)
-      projectileMaterial.emissiveColor = isCyber ? new Color3(0.55, 0.34, 0.72) : new Color3(0.16, 0.72, 0.56)
+      projectileMaterial.diffuseColor = isCyber ? new Color3(0.71, 0.49, 0.86) : isAsat ? new Color3(0.45, 0.72, 0.98) : new Color3(0.28, 0.94, 0.76)
+      projectileMaterial.emissiveColor = isCyber ? new Color3(0.55, 0.34, 0.72) : isAsat ? new Color3(0.24, 0.5, 0.82) : new Color3(0.16, 0.72, 0.56)
       projectile.material = projectileMaterial
     }
     const recentOutcomes = engagements.filter((engagement) => engagement.status !== 'in_flight').slice(-4)
@@ -199,6 +203,7 @@ export function TacticalScene({ units, contacts, engagements, coastlines, elapse
         hit: new Color3(0.98, 0.31, 0.25),
         damaged: new Color3(0.98, 0.68, 0.28),
         disrupted: new Color3(0.76, 0.55, 0.88),
+        disabled: new Color3(0.45, 0.72, 0.98),
         intercepted: new Color3(0.35, 0.78, 0.94),
         miss: new Color3(0.58, 0.69, 0.69),
         aborted: new Color3(0.42, 0.5, 0.51),

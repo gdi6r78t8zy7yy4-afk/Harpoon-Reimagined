@@ -24,9 +24,9 @@ export type Sensor = {
 export type Weapon = {
   id: string
   name: string
-  kind: 'missile' | 'torpedo' | 'gun' | 'cyber'
+  kind: 'missile' | 'torpedo' | 'gun' | 'cyber' | 'asat'
   rangeNm: number
-  domains: Array<'surface' | 'air' | 'subsurface'>
+  domains: Array<'surface' | 'air' | 'subsurface' | 'space'>
   ammunition: number
   hitChancePercent: number
   speedKnots: number
@@ -41,6 +41,19 @@ export type DefenseSystem = {
   interceptChancePercent: number
 }
 
+export type SatellitePass = {
+  startSeconds: number
+  durationSeconds: number
+}
+
+export type OrbitalSensor = {
+  id: string
+  name: string
+  rangeNm: number
+  domains: Array<'surface' | 'air'>
+  passes: SatellitePass[]
+}
+
 export type Contact = {
   id: string
   label: string
@@ -48,7 +61,7 @@ export type Contact = {
   confidence: number
   bearing: number
   rangeNm: number
-  domain: 'surface' | 'air' | 'subsurface'
+  domain: 'surface' | 'air' | 'subsurface' | 'space'
   x: number
   z: number
   identified: boolean
@@ -56,6 +69,13 @@ export type Contact = {
   defenses: DefenseSystem[]
   defensesDisruptedUntilSeconds: number
   defenseDisruptionSource: string | null
+  groundTrackHeadingDeg: number
+  groundTrackSpeedKnots: number
+  orbitalSensor: OrbitalSensor | null
+  hardeningSeconds: number
+  hardeningUntilSeconds: number
+  sensorsDisabledUntilSeconds: number
+  sensorDisableSource: string | null
   lastReportedSeconds: number
   confidenceAtLastReport: number
   rangeUncertaintyNm: number
@@ -74,7 +94,7 @@ export type TrackReport = {
   unitName: string
   sensorId: string
   sensorName: string
-  sensorKind: Sensor['kind']
+  sensorKind: Sensor['kind'] | 'space-based'
 }
 
 export type Objective = {
@@ -124,7 +144,7 @@ export type Engagement = {
   disruptionDurationSeconds: number
   damageAppliedPercent: number
   interceptedBy: string | null
-  status: 'in_flight' | 'hit' | 'damaged' | 'disrupted' | 'miss' | 'intercepted' | 'aborted'
+  status: 'in_flight' | 'hit' | 'damaged' | 'disrupted' | 'disabled' | 'miss' | 'intercepted' | 'aborted'
   hit: boolean
 }
 
@@ -136,6 +156,7 @@ export type CampaignProgress = {
   activeScenarioId: string
   completedScenarios: string[]
   scenarioResults: ScenarioResult[]
+  escalationLevel: number
 }
 
 export type ScenarioResult = {
@@ -148,8 +169,17 @@ export type ScenarioResult = {
   damaged: number
   intercepted: number
   cyberDisruptions: number
+  spaceStrikes: number
+  satellitesDisabled: number
   misses: number
   aborted: number
+}
+
+export type Consequence = {
+  id: string
+  minEscalation: number
+  title: string
+  description: string
 }
 
 export type Coastline = {

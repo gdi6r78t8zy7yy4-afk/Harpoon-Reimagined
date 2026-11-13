@@ -1,17 +1,18 @@
 import { invoke } from '@tauri-apps/api/core'
 import scenario from './data/north-atlantic-intercept.json'
 import campaignDefinition from './data/northern-watch.json'
-import type { CampaignProgress, CampaignSession, CampaignSettings, CampaignStatus, Coastline, Contact, SimulationState, Unit } from './types'
+import type { CampaignProgress, CampaignSession, CampaignSettings, CampaignStatus, Coastline, Consequence, Contact, OrbitalSensor, SimulationState, Unit } from './types'
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
 }
 
 export const scenarioCoastlines: Coastline[] = scenario.coastlines
+export const campaignConsequences: Consequence[] = (campaignDefinition as { consequences?: Consequence[] }).consequences ?? []
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
 type ScenarioDefense = { id: string; name: string; charges: number; interceptChancePercent: number }
-type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed' | 'health' | 'defenses' | 'defensesDisruptedUntilSeconds' | 'defenseDisruptionSource'> & { position: { x: number; z: number }; defenses: ScenarioDefense[] }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed' | 'health' | 'defenses' | 'defensesDisruptedUntilSeconds' | 'defenseDisruptionSource' | 'groundTrackHeadingDeg' | 'groundTrackSpeedKnots' | 'orbitalSensor' | 'hardeningSeconds' | 'hardeningUntilSeconds' | 'sensorsDisabledUntilSeconds' | 'sensorDisableSource'> & { position: { x: number; z: number }; defenses: ScenarioDefense[]; groundTrack?: { heading: number; speedKnots: number }; orbitalSensor?: OrbitalSensor; hardeningSeconds?: number }
 
 const initialRangeUncertainty = (confidence: number) => 1 + (100 - confidence) * 0.12
 const initialBearingUncertainty = (confidence: number) => 2 + (100 - confidence) * 0.5
@@ -39,7 +40,7 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false, health: 100, defensesDisruptedUntilSeconds: 0, defenseDisruptionSource: null, defenses: (contact.defenses ?? []).map(({ charges, ...defense }) => ({ ...defense, remainingCharges: charges })) })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, groundTrack, hardeningSeconds, orbitalSensor, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false, health: 100, defensesDisruptedUntilSeconds: 0, defenseDisruptionSource: null, groundTrackHeadingDeg: groundTrack?.heading ?? 0, groundTrackSpeedKnots: groundTrack?.speedKnots ?? 0, orbitalSensor: orbitalSensor ?? null, hardeningSeconds: hardeningSeconds ?? 600, hardeningUntilSeconds: 0, sensorsDisabledUntilSeconds: 0, sensorDisableSource: null, defenses: (contact.defenses ?? []).map(({ charges, ...defense }) => ({ ...defense, remainingCharges: charges })) })),
     engagements: [],
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
@@ -59,6 +60,7 @@ const defaultCampaign = (): CampaignProgress => ({
   activeScenarioId: campaignDefinition.scenarios[0] ?? scenario.id,
   completedScenarios: [],
   scenarioResults: [],
+  escalationLevel: 0,
 })
 
 type BrowserSave = { saveVersion: number; savedAt: number; campaign: CampaignProgress; settings?: CampaignSettings; simulation: SimulationState }
@@ -106,6 +108,13 @@ function normalizeBrowserContacts(state: SimulationState) {
     if (!Array.isArray(contact.defenses)) contact.defenses = []
     if (!Number.isFinite(contact.defensesDisruptedUntilSeconds)) contact.defensesDisruptedUntilSeconds = 0
     if (typeof contact.defenseDisruptionSource !== 'string') contact.defenseDisruptionSource = null
+    if (!Number.isFinite(contact.groundTrackHeadingDeg)) contact.groundTrackHeadingDeg = 0
+    if (!Number.isFinite(contact.groundTrackSpeedKnots)) contact.groundTrackSpeedKnots = 0
+    if (contact.orbitalSensor === undefined) contact.orbitalSensor = null
+    if (!Number.isFinite(contact.hardeningSeconds) || contact.hardeningSeconds <= 0) contact.hardeningSeconds = 600
+    if (!Number.isFinite(contact.hardeningUntilSeconds)) contact.hardeningUntilSeconds = 0
+    if (!Number.isFinite(contact.sensorsDisabledUntilSeconds)) contact.sensorsDisabledUntilSeconds = 0
+    if (typeof contact.sensorDisableSource !== 'string') contact.sensorDisableSource = null
     if (contact.destroyed) contact.health = 0
     else if (contact.health <= 0) contact.destroyed = true
   }
@@ -123,7 +132,17 @@ function normalizeScenarioResults(campaign: CampaignProgress) {
   if (!Array.isArray(campaign.scenarioResults)) campaign.scenarioResults = []
   for (const result of campaign.scenarioResults) {
     if (!Number.isFinite(result.cyberDisruptions)) result.cyberDisruptions = 0
+    if (!Number.isFinite(result.spaceStrikes)) result.spaceStrikes = 0
+    if (!Number.isFinite(result.satellitesDisabled)) result.satellitesDisabled = 0
   }
+  if (!Number.isFinite(campaign.escalationLevel)) campaign.escalationLevel = 0
+}
+
+function recomputeEscalation(campaign: CampaignProgress) {
+  campaign.escalationLevel = campaign.scenarioResults.reduce(
+    (level, result) => level + (result.cyberDisruptions > 0 ? 1 : 0) + (result.satellitesDisabled > 0 ? 2 : 0),
+    0,
+  )
 }
 
 normalizeBrowserContacts(browserState)
@@ -188,12 +207,20 @@ export async function advance(seconds = 60) {
   const safeSeconds = Math.max(1, Math.min(seconds, 3600))
   browserState.tick += 1
   browserState.elapsedSeconds += safeSeconds
-  recoverBrowserDisruptions()
+  recoverBrowserDisabledEffects()
   for (const unit of browserState.units) {
     const radians = unit.heading * Math.PI / 180
     const distance = unit.speedKnots * safeSeconds / 3600
     unit.x += Math.sin(radians) * distance
     unit.z -= Math.cos(radians) * distance
+  }
+  for (const contact of browserState.contacts) {
+    if (contact.groundTrackSpeedKnots <= 0) continue
+    const radians = contact.groundTrackHeadingDeg * Math.PI / 180
+    const distance = contact.groundTrackSpeedKnots * safeSeconds / 3600
+    // Ground tracks wrap at the map edge, modelling successive orbits re-entering the area of operations.
+    contact.x = ((contact.x + Math.sin(radians) * distance + 50) % 100 + 100) % 100 - 50
+    contact.z = ((contact.z - Math.cos(radians) * distance + 50) % 100 + 100) % 100 - 50
   }
   for (const contact of browserState.contacts) {
     if (contact.identified) continue
@@ -209,6 +236,7 @@ export async function advance(seconds = 60) {
     contact.bearingUncertaintyDeg = Math.min(180, contact.bearingUncertaintyAtLastReport + ageSteps)
     if (previousAge < 1800 && trackAge >= 1800) addEvent(`Track is stale: ${contact.label}`, 'SENSORS')
   }
+  processBrowserOrbitalPasses(previousElapsedSeconds)
   for (const engagement of browserState.engagements) {
     if (engagement.status !== 'in_flight' || engagement.impactAtSeconds > browserState.elapsedSeconds) continue
     const target = browserState.contacts.find((item) => item.id === engagement.contactId)
@@ -231,8 +259,15 @@ export async function advance(seconds = 60) {
           defense.remainingCharges -= 1
           engagement.interceptedBy = defense.name
         }
+        if (engagement.weaponKind === 'asat') target.hardeningUntilSeconds = Math.max(target.hardeningUntilSeconds, engagement.impactAtSeconds) + target.hardeningSeconds
         engagement.hit = false
         engagement.status = 'intercepted'
+      } else if (engagement.weaponKind === 'asat') {
+        const disableStart = Math.max(target.sensorsDisabledUntilSeconds, engagement.impactAtSeconds)
+        target.sensorsDisabledUntilSeconds = disableStart + Math.max(60, engagement.disruptionDurationSeconds)
+        target.sensorDisableSource = engagement.weaponName
+        target.hardeningUntilSeconds = target.sensorsDisabledUntilSeconds + target.hardeningSeconds
+        engagement.status = 'disabled'
       } else {
         engagement.damageAppliedPercent = Math.min(target.health, engagement.damagePercent)
         target.health = Math.max(0, target.health - engagement.damagePercent)
@@ -251,14 +286,16 @@ export async function advance(seconds = 60) {
         ? `${engagement.weaponName} damaged ${engagement.contactLabel} (${engagement.damageAppliedPercent}% damage)`
         : engagement.status === 'disrupted'
           ? `${engagement.weaponName} disrupted ${engagement.contactLabel}'s defensive systems for ${Math.ceil(engagement.disruptionDurationSeconds / 60)} min`
+        : engagement.status === 'disabled'
+          ? `${engagement.weaponName} disabled ${engagement.contactLabel}'s orbital sensors for ${Math.ceil(engagement.disruptionDurationSeconds / 60)} min`
         : engagement.status === 'intercepted'
           ? `${engagement.weaponName} intercepted by ${engagement.interceptedBy ?? 'defenses'} protecting ${engagement.contactLabel}`
       : engagement.status === 'miss'
         ? `${engagement.weaponName} missed ${engagement.contactLabel}`
         : `${engagement.weaponName} impact aborted; ${engagement.contactLabel} is no longer active`
-    addEvent(message, engagement.weaponKind === 'cyber' ? 'CYBER OPERATIONS' : 'WEAPONS CONTROL')
+    addEvent(message, engagement.weaponKind === 'cyber' ? 'CYBER OPERATIONS' : engagement.weaponKind === 'asat' ? 'COUNTER-SPACE' : 'WEAPONS CONTROL')
   }
-  recoverBrowserDisruptions()
+  recoverBrowserDisabledEffects()
   updateMissionCompletion()
   return structuredClone(browserState)
 }
@@ -298,7 +335,7 @@ export async function sensorSweep(unitId: string, sensorId: string) {
     const dx = contact.x - unit.x
     const dz = contact.z - unit.z
     const distanceNm = Math.hypot(dx, dz) * 5
-    const capable = sensor.domains.includes(contact.domain) && distanceNm <= sensor.rangeNm
+    const capable = contact.domain !== 'space' && sensor.domains.includes(contact.domain) && distanceNm <= sensor.rangeNm
     if (!capable) continue
     const confidenceGain = sensor.kind === 'radar' ? 10 : sensor.kind === 'sonar' ? 7 : 5
     const observedBearing = ((Math.round(Math.atan2(dx, -dz) * 180 / Math.PI) % 360) + 360) % 360
@@ -382,6 +419,7 @@ export async function fireWeapon(unitId: string, weaponId: string, contactId: st
   if (!contact) throw new Error('Contact not found')
   if (contact.destroyed) throw new Error('This contact has already been destroyed')
   if (!contact.identified || contact.classification !== 'Hostile platform') throw new Error('Only identified hostile contacts can be engaged')
+  if (weapon.kind === 'asat' && contact.hardeningUntilSeconds > browserState.elapsedSeconds) throw new Error('Target satellite is hardened against further counter-space attacks')
   if (!weapon.domains.includes(contact.domain)) throw new Error("This weapon cannot engage the contact's domain")
   if (contact.rangeNm > weapon.rangeNm) throw new Error("Contact is outside this weapon's estimated range")
   if (weapon.ammunition <= 0) throw new Error('No ammunition remains for this weapon')
@@ -420,22 +458,72 @@ function updateMissionCompletion() {
     damaged: countStatus('damaged'),
     intercepted: countStatus('intercepted'),
     cyberDisruptions: countStatus('disrupted'),
+    spaceStrikes: browserState.engagements.filter((engagement) => engagement.weaponKind === 'asat').length,
+    satellitesDisabled: countStatus('disabled'),
     misses: countStatus('miss'),
     aborted: countStatus('aborted'),
   }
   const existingResult = browserCampaign.scenarioResults.findIndex((item) => item.scenarioId === result.scenarioId)
   if (existingResult >= 0) browserCampaign.scenarioResults[existingResult] = result
   else browserCampaign.scenarioResults.push(result)
+  recomputeEscalation(browserCampaign)
   addEvent('Mission complete: contact picture established', 'MISSION CONTROL')
 }
 
-function recoverBrowserDisruptions() {
+function recoverBrowserDisabledEffects() {
   for (const contact of browserState.contacts) {
     if (contact.defensesDisruptedUntilSeconds === 0 || contact.defensesDisruptedUntilSeconds > browserState.elapsedSeconds) continue
     const source = contact.defenseDisruptionSource ?? 'CYBER DEFENSE'
     contact.defensesDisruptedUntilSeconds = 0
     contact.defenseDisruptionSource = null
     addEvent(`Defensive systems restored on ${contact.label}`, source)
+  }
+  for (const contact of browserState.contacts) {
+    if (contact.sensorsDisabledUntilSeconds === 0 || contact.sensorsDisabledUntilSeconds > browserState.elapsedSeconds) continue
+    const source = contact.sensorDisableSource ?? 'SPACE DOMAIN'
+    contact.sensorsDisabledUntilSeconds = 0
+    contact.sensorDisableSource = null
+    addEvent(`Orbital sensing restored on ${contact.label}`, source)
+  }
+}
+
+function processBrowserOrbitalPasses(previousElapsedSeconds: number) {
+  const passSources: Array<{ satellite: Contact; sensor: OrbitalSensor }> = []
+  for (const satellite of browserState.contacts) {
+    if (!satellite.orbitalSensor) continue
+    for (const pass of satellite.orbitalSensor.passes) {
+      if (pass.startSeconds > previousElapsedSeconds && pass.startSeconds <= browserState.elapsedSeconds) {
+        passSources.push({ satellite, sensor: satellite.orbitalSensor })
+      }
+    }
+  }
+  for (const { satellite, sensor } of passSources) {
+    if (satellite.sensorsDisabledUntilSeconds > browserState.elapsedSeconds) {
+      addEvent(`${satellite.label} pass window missed; orbital sensors are disabled`, 'COUNTER-SPACE')
+      continue
+    }
+    let reports = 0
+    for (const contact of browserState.contacts) {
+      if (contact === satellite || contact.identified || contact.destroyed) continue
+      if ((contact.domain !== 'surface' && contact.domain !== 'air') || !sensor.domains.includes(contact.domain)) continue
+      const dx = contact.x - satellite.x
+      const dz = contact.z - satellite.z
+      if (Math.hypot(dx, dz) * 5 > sensor.rangeNm) continue
+      const observedBearing = ((Math.round(Math.atan2(dx, -dz) * 180 / Math.PI) % 360) + 360) % 360
+      const fusedBearing = fuseBearing(contact.bearing, contact.bearingUncertaintyDeg, observedBearing, 3)
+      contact.bearing = fusedBearing.bearing
+      contact.bearingUncertaintyDeg = fusedBearing.uncertainty
+      contact.confidence = Math.min(99, contact.confidence + 12)
+      contact.lastReportedSeconds = browserState.elapsedSeconds
+      contact.confidenceAtLastReport = contact.confidence
+      contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
+      contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
+      contact.reportCount += 1
+      contact.reportHistory.push({ elapsedSeconds: browserState.elapsedSeconds, unitId: satellite.id, unitName: satellite.label, sensorId: sensor.id, sensorName: sensor.name, sensorKind: 'space-based' })
+      contact.reportHistory = contact.reportHistory.slice(-20)
+      reports += 1
+    }
+    addEvent(`${satellite.label} orbital pass complete: ${reports} contact report(s) updated`, 'SPACE DOMAIN')
   }
 }
 
