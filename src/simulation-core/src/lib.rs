@@ -1,5 +1,6 @@
 use harpoon_scenario_format::{
-    DefenseSystemDefinition, ScenarioDefinition, SensorDefinition, WeaponDefinition,
+    DefenseSystemDefinition, OrbitalSensorDefinition, ScenarioDefinition, SensorDefinition,
+    WeaponDefinition,
 };
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +65,24 @@ pub struct Contact {
     pub correlated_contact_ids: Vec<String>,
     #[serde(default)]
     pub destroyed: bool,
+    #[serde(default)]
+    pub ground_track_heading_deg: f32,
+    #[serde(default)]
+    pub ground_track_speed_knots: u16,
+    #[serde(default)]
+    pub orbital_sensor: Option<OrbitalSensorDefinition>,
+    #[serde(default = "default_hardening_seconds")]
+    pub hardening_seconds: u16,
+    #[serde(default)]
+    pub hardening_until_seconds: u64,
+    #[serde(default)]
+    pub sensors_disabled_until_seconds: u64,
+    #[serde(default)]
+    pub sensor_disable_source: Option<String>,
+}
+
+fn default_hardening_seconds() -> u16 {
+    600
 }
 
 fn default_contact_health() -> u8 {
@@ -253,6 +272,16 @@ impl SimulationState {
                 report_history: Vec::new(),
                 correlated_contact_ids: Vec::new(),
                 destroyed: false,
+                ground_track_heading_deg: contact.ground_track.as_ref().map_or(0.0, |track| track.heading),
+                ground_track_speed_knots: contact
+                    .ground_track
+                    .as_ref()
+                    .map_or(0, |track| track.speed_knots),
+                orbital_sensor: contact.orbital_sensor,
+                hardening_seconds: contact.hardening_seconds.unwrap_or(600),
+                hardening_until_seconds: 0,
+                sensors_disabled_until_seconds: 0,
+                sensor_disable_source: None,
             })
             .collect();
         let objectives = scenario
@@ -330,13 +359,24 @@ impl SimulationState {
         let seconds = seconds.clamp(1, 3600);
         self.tick += 1;
         self.elapsed_seconds += seconds;
-        self.recover_disrupted_defenses();
+        self.recover_disabled_effects();
         for unit in &mut self.units {
             if unit.speed_knots > 0 {
                 let radians = unit.heading.to_radians();
                 let distance = f32::from(unit.speed_knots) * seconds as f32 / 3600.0;
                 unit.x += radians.sin() * distance;
                 unit.z -= radians.cos() * distance;
+            }
+        }
+        for contact in &mut self.contacts {
+            if contact.ground_track_speed_knots > 0 {
+                let radians = contact.ground_track_heading_deg.to_radians();
+                let distance =
+                    f32::from(contact.ground_track_speed_knots) * seconds as f32 / 3600.0;
+                // Ground tracks wrap at the map edge, modelling successive orbits
+                // re-entering the area of operations.
+                contact.x = (contact.x + distance * radians.sin() + 50.0).rem_euclid(100.0) - 50.0;
+                contact.z = (contact.z - distance * radians.cos() + 50.0).rem_euclid(100.0) - 50.0;
             }
         }
         let mut stale_tracks = Vec::new();
@@ -369,6 +409,7 @@ impl SimulationState {
         for label in stale_tracks {
             self.push_event(format!("Track is stale: {label}"), "SENSORS".into());
         }
+        self.process_orbital_passes(previous_elapsed_seconds);
         let mut impact_events = Vec::new();
         for engagement in &mut self.engagements {
             if engagement.status != "in_flight"
@@ -427,8 +468,27 @@ impl SimulationState {
                                 defense.remaining_charges -= 1;
                                 engagement.intercepted_by = Some(defense.name.clone());
                             }
+                            if engagement.weapon_kind == "asat" {
+                                contact.hardening_until_seconds = contact
+                                    .hardening_until_seconds
+                                    .max(engagement.impact_at_seconds)
+                                    .saturating_add(u64::from(contact.hardening_seconds));
+                            }
                             engagement.hit = false;
                             engagement.status = "intercepted".into();
+                        } else if engagement.weapon_kind == "asat" {
+                            let disable_start = contact
+                                .sensors_disabled_until_seconds
+                                .max(engagement.impact_at_seconds);
+                            contact.sensors_disabled_until_seconds = disable_start
+                                .saturating_add(u64::from(
+                                    engagement.disruption_duration_seconds.max(60),
+                                ));
+                            contact.sensor_disable_source = Some(engagement.weapon_name.clone());
+                            contact.hardening_until_seconds = contact
+                                .sensors_disabled_until_seconds
+                                .saturating_add(u64::from(contact.hardening_seconds));
+                            engagement.status = "disabled".into();
                         } else {
                             engagement.damage_applied_percent =
                                 contact.health.min(engagement.damage_percent);
@@ -467,6 +527,10 @@ impl SimulationState {
                     "{weapon_name} disrupted {contact_label}'s defensive systems for {} min",
                     u64::from(disruption_duration).div_ceil(60)
                 ),
+                "disabled" => format!(
+                    "{weapon_name} disabled {contact_label}'s orbital sensors for {} min",
+                    u64::from(disruption_duration).div_ceil(60)
+                ),
                 "intercepted" => format!(
                     "{weapon_name} intercepted by {} protecting {contact_label}",
                     intercepted_by.unwrap_or_else(|| "defenses".into())
@@ -474,14 +538,111 @@ impl SimulationState {
                 "miss" => format!("{weapon_name} missed {contact_label}"),
                 _ => format!("{weapon_name} impact aborted; {contact_label} is no longer active"),
             };
-            let source = if weapon_kind == "cyber" { "CYBER OPERATIONS" } else { "WEAPONS CONTROL" };
+            let source = match weapon_kind.as_str() {
+                "cyber" => "CYBER OPERATIONS",
+                "asat" => "COUNTER-SPACE",
+                _ => "WEAPONS CONTROL",
+            };
             self.push_event(message, source.into());
         }
-        self.recover_disrupted_defenses();
+        self.recover_disabled_effects();
         self.maybe_complete_mission();
     }
 
-    fn recover_disrupted_defenses(&mut self) {
+    fn process_orbital_passes(&mut self, previous_elapsed_seconds: u64) {
+        let mut pass_sources = Vec::new();
+        for (index, contact) in self.contacts.iter().enumerate() {
+            let Some(sensor) = &contact.orbital_sensor else {
+                continue;
+            };
+            for pass in &sensor.passes {
+                if pass.start_seconds > previous_elapsed_seconds
+                    && pass.start_seconds <= self.elapsed_seconds
+                {
+                    pass_sources.push((
+                        index,
+                        contact.id.clone(),
+                        contact.label.clone(),
+                        contact.x,
+                        contact.z,
+                        contact.sensors_disabled_until_seconds > self.elapsed_seconds,
+                        sensor.id.clone(),
+                        sensor.name.clone(),
+                        sensor.range_nm,
+                        sensor.domains.clone(),
+                    ));
+                }
+            }
+        }
+        for (
+            sat_index,
+            sat_id,
+            sat_label,
+            sat_x,
+            sat_z,
+            disabled,
+            sensor_id,
+            sensor_name,
+            range_nm,
+            domains,
+        ) in pass_sources
+        {
+            if disabled {
+                self.push_event(
+                    format!("{sat_label} pass window missed; orbital sensors are disabled"),
+                    "COUNTER-SPACE".into(),
+                );
+                continue;
+            }
+            let mut reports = 0_u32;
+            for (index, contact) in self.contacts.iter_mut().enumerate() {
+                if index == sat_index || contact.identified || contact.destroyed {
+                    continue;
+                }
+                if !domains.iter().any(|domain| domain == &contact.domain) {
+                    continue;
+                }
+                let dx = contact.x - sat_x;
+                let dz = contact.z - sat_z;
+                if dx.hypot(dz) * 5.0 > range_nm {
+                    continue;
+                }
+                let observed_bearing = (dx.atan2(-dz).to_degrees().rem_euclid(360.0).round() as u16) % 360;
+                let (fused_bearing, fused_sigma) = fuse_bearing(
+                    contact.bearing,
+                    contact.bearing_uncertainty_deg,
+                    observed_bearing,
+                    3.0,
+                );
+                contact.bearing = fused_bearing;
+                contact.bearing_uncertainty_deg = fused_sigma;
+                contact.confidence = contact.confidence.saturating_add(12).min(99);
+                contact.last_reported_seconds = self.elapsed_seconds;
+                contact.confidence_at_last_report = contact.confidence;
+                contact.range_uncertainty_at_last_report = contact.range_uncertainty_nm;
+                contact.bearing_uncertainty_at_last_report = contact.bearing_uncertainty_deg;
+                contact.report_count = contact.report_count.saturating_add(1);
+                contact.report_history.push(TrackReport {
+                    elapsed_seconds: self.elapsed_seconds,
+                    unit_id: sat_id.clone(),
+                    unit_name: sat_label.clone(),
+                    sensor_id: sensor_id.clone(),
+                    sensor_name: sensor_name.clone(),
+                    sensor_kind: "space-based".into(),
+                });
+                if contact.report_history.len() > MAX_TRACK_REPORT_HISTORY {
+                    contact.report_history.remove(0);
+                }
+                reports += 1;
+            }
+            self.push_event(
+                format!("{sat_label} orbital pass complete: {reports} contact report(s) updated"),
+                "SPACE DOMAIN".into(),
+            );
+        }
+    }
+
+    fn recover_disabled_effects(&mut self) {
         let mut recovered = Vec::new();
         for contact in &mut self.contacts {
             if contact.defenses_disrupted_until_seconds == 0
@@ -496,6 +657,22 @@ impl SimulationState {
             self.push_event(
                 format!("Defensive systems restored on {label}"),
                 source.unwrap_or_else(|| "CYBER DEFENSE".into()),
+            );
+        }
+        let mut restored_sensing = Vec::new();
+        for contact in &mut self.contacts {
+            if contact.sensors_disabled_until_seconds == 0
+                || contact.sensors_disabled_until_seconds > self.elapsed_seconds
+            {
+                continue;
+            }
+            contact.sensors_disabled_until_seconds = 0;
+            restored_sensing.push((contact.label.clone(), contact.sensor_disable_source.take()));
+        }
+        for (label, source) in restored_sensing {
+            self.push_event(
+                format!("Orbital sensing restored on {label}"),
+                source.unwrap_or_else(|| "SPACE DOMAIN".into()),
             );
         }
     }
@@ -716,6 +893,11 @@ impl SimulationState {
         }
         if !contact.identified || contact.classification != "Hostile platform" {
             return Err("Only identified hostile contacts can be engaged".into());
+        }
+        if weapon.kind == "asat" && contact.hardening_until_seconds > self.elapsed_seconds {
+            return Err(
+                "Target satellite is hardened against further counter-space attacks".into(),
+            );
         }
         if !weapon
             .domains
@@ -1350,5 +1532,221 @@ mod tests {
         );
         assert!(state.contacts[0].range_uncertainty_nm > 0.0);
         assert_eq!(state.contacts[0].report_count, 1);
+    }
+
+    fn state_with_satellite() -> SimulationState {
+        let mut value: serde_json::Value =
+            serde_json::from_str(super::STARTER_SCENARIO).unwrap();
+        value["contacts"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": "sat-1",
+                "label": "COSMOS 2547",
+                "classification": "Unknown",
+                "confidence": 60,
+                "bearing": 90,
+                "rangeNm": 300.0,
+                "domain": "space",
+                "position": { "x": -20.0, "z": -20.0 },
+                "identified": false,
+                "groundTrack": { "heading": 90.0, "speedKnots": 120 },
+                "hardeningSeconds": 600,
+                "orbitalSensor": {
+                    "id": "sar-1",
+                    "name": "SAR swath",
+                    "rangeNm": 600.0,
+                    "domains": ["surface", "air"],
+                    "passes": [
+                        { "startSeconds": 20_000, "durationSeconds": 900 },
+                        { "startSeconds": 30_000, "durationSeconds": 900 }
+                    ]
+                }
+            }));
+        value["units"][0]["weapons"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": "asat-1",
+                "name": "SM-3 ERAM",
+                "kind": "asat",
+                "rangeNm": 900.0,
+                "domains": ["space"],
+                "ammunition": 4,
+                "hitChancePercent": 70,
+                "speedKnots": 4500,
+                "damagePercent": 0,
+                "effectDurationSeconds": 1800
+            }));
+        SimulationState::from_scenario_json(&value.to_string()).unwrap()
+    }
+
+    fn advance_until(state: &mut SimulationState, target_seconds: u64) {
+        while state.elapsed_seconds < target_seconds {
+            let step = (target_seconds - state.elapsed_seconds).min(3600);
+            state.advance(step);
+        }
+    }
+
+    #[test]
+    fn satellite_ground_track_wraps_at_the_map_edge() {
+        let mut state = state_with_satellite();
+        assert_eq!(state.contacts[3].x, -20.0);
+
+        advance_until(&mut state, 15_510 + 7_200);
+
+        assert_ne!(state.contacts[3].x, -20.0);
+        assert!((-50.0..=50.0).contains(&state.contacts[3].x));
+        assert!((-50.0..=50.0).contains(&state.contacts[3].z));
+    }
+
+    #[test]
+    fn orbital_passes_refresh_eligible_tracks_deterministically() {
+        let mut state = state_with_satellite();
+        let surface_reports_before = state.contacts[0].report_count;
+        let air_reports_before = state.contacts[1].report_count;
+        let sub_reports_before = state.contacts[2].report_count;
+
+        advance_until(&mut state, 20_001);
+
+        assert_eq!(state.contacts[0].report_count, surface_reports_before + 1);
+        assert_eq!(state.contacts[1].report_count, air_reports_before + 1);
+        assert_eq!(state.contacts[2].report_count, sub_reports_before);
+        let pass_report = state.contacts[0]
+            .report_history
+            .iter()
+            .find(|report| report.sensor_kind == "space-based")
+            .expect("pass report recorded on surface track");
+        assert_eq!(pass_report.unit_id, "sat-1");
+        assert_eq!(pass_report.sensor_id, "sar-1");
+        assert!(state.events.iter().any(|event| {
+            event.source == "SPACE DOMAIN" && event.message.contains("orbital pass complete")
+        }));
+
+        // No further reports until the next pass window starts.
+        let after_pass = state.contacts[0].report_count;
+        advance_until(&mut state, 25_000);
+        assert_eq!(state.contacts[0].report_count, after_pass);
+    }
+
+    #[test]
+    fn asat_hit_disables_sensing_and_hardening_blocks_relaunch() {
+        let mut state = state_with_satellite();
+        state.classify_contact("sat-1", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "asat-1", "sat-1");
+
+        state.fire_weapon("ddg-01", "asat-1", "sat-1").unwrap();
+        let seconds_to_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_impact);
+
+        assert_eq!(state.engagements[0].status, "disabled");
+        assert_eq!(state.contacts[3].health, 100);
+        assert!(!state.contacts[3].destroyed);
+        let disabled_until = state.contacts[3].sensors_disabled_until_seconds;
+        assert_eq!(disabled_until, state.engagements[0].impact_at_seconds + 1800);
+        assert_eq!(
+            state.contacts[3].sensor_disable_source.as_deref(),
+            Some("SM-3 ERAM")
+        );
+        assert_eq!(state.contacts[3].hardening_until_seconds, disabled_until + 600);
+        assert!(state.events.iter().any(|event| {
+            event.source == "COUNTER-SPACE" && event.message.contains("disabled")
+        }));
+
+        assert!(state
+            .fire_weapon("ddg-01", "asat-1", "sat-1")
+            .unwrap_err()
+            .contains("hardened"));
+
+        advance_until(&mut state, disabled_until + 1);
+        assert_eq!(state.contacts[3].sensors_disabled_until_seconds, 0);
+        assert!(state.events.iter().any(|event| {
+            event.message == "Orbital sensing restored on HOSTILE SPACE"
+                && event.source == "SM-3 ERAM"
+        }));
+
+        // Hardening outlasts the disable window; launches resume once it expires.
+        assert!(state.fire_weapon("ddg-01", "asat-1", "sat-1").is_err());
+        let hardened_until = state.contacts[3].hardening_until_seconds;
+        advance_until(&mut state, hardened_until + 1);
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "asat-1", "sat-1");
+        state.fire_weapon("ddg-01", "asat-1", "sat-1").unwrap();
+    }
+
+    #[test]
+    fn disabled_satellite_misses_its_pass_window() {
+        let mut state = state_with_satellite();
+        state.contacts[3].sensors_disabled_until_seconds = 25_000;
+        let reports_before = state.contacts[0].report_count;
+
+        advance_until(&mut state, 20_001);
+
+        assert_eq!(state.contacts[0].report_count, reports_before);
+        assert!(!state
+            .events
+            .iter()
+            .any(|event| event.message.contains("orbital pass complete")));
+        assert!(state.events.iter().any(|event| {
+            event.source == "COUNTER-SPACE" && event.message.contains("pass window missed")
+        }));
+    }
+
+    #[test]
+    fn asat_interception_consumes_charge_and_triggers_hardening() {
+        let mut state = state_with_satellite();
+        state.classify_contact("sat-1", "hostile").unwrap();
+        state.contacts[3].defenses.push(super::DefenseSystem {
+            id: "nasat".into(),
+            name: "Nudol ASAT defense".into(),
+            remaining_charges: 2,
+            intercept_chance_percent: 100,
+        });
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "asat-1", "sat-1");
+
+        state.fire_weapon("ddg-01", "asat-1", "sat-1").unwrap();
+        let seconds_to_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_impact);
+
+        assert_eq!(state.engagements[0].status, "intercepted");
+        assert_eq!(state.contacts[3].defenses[0].remaining_charges, 1);
+        assert_eq!(state.contacts[3].sensors_disabled_until_seconds, 0);
+        assert_eq!(
+            state.contacts[3].hardening_until_seconds,
+            state.engagements[0].impact_at_seconds + 600
+        );
+
+        // A hardened satellite rejects further launches even with sensing intact.
+        assert!(state
+            .fire_weapon("ddg-01", "asat-1", "sat-1")
+            .unwrap_err()
+            .contains("hardened"));
+    }
+
+    #[test]
+    fn m11_space_fields_default_when_loading_older_saves() {
+        let state = SimulationState::default();
+        let mut old_save = serde_json::to_value(state).unwrap();
+        for field in [
+            "groundTrackHeadingDeg",
+            "groundTrackSpeedKnots",
+            "orbitalSensor",
+            "hardeningSeconds",
+            "hardeningUntilSeconds",
+            "sensorsDisabledUntilSeconds",
+            "sensorDisableSource",
+        ] {
+            old_save["contacts"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+        }
+
+        let restored: SimulationState = serde_json::from_value(old_save).unwrap();
+        assert_eq!(restored.contacts[0].ground_track_speed_knots, 0);
+        assert!(restored.contacts[0].orbital_sensor.is_none());
+        assert_eq!(restored.contacts[0].hardening_seconds, 600);
+        assert_eq!(restored.contacts[0].hardening_until_seconds, 0);
+        assert_eq!(restored.contacts[0].sensors_disabled_until_seconds, 0);
+        assert!(restored.contacts[0].sensor_disable_source.is_none());
     }
 }

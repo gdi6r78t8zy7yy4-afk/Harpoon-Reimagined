@@ -9,7 +9,7 @@ Space adds one decision to the game: **who can see the battlespace**. Orbital se
 ## Domain model
 
 - `space` becomes a fourth value in every existing domain list (unit, contact, sensor, weapon target domains).
-- Space contacts are satellite **ground tracks** projected onto the tactical plane. They carry an optional motion vector (heading and ground-track speed) so they cross the area of operations; all position, bearing, range, and uncertainty math stays two-dimensional (see ADR 0002). The drift represents averaged sub-satellite motion over the scenario horizon, not instantaneous orbital velocity — true revisit geometry is out of scope.
+- Space contacts are satellite **ground tracks** projected onto the tactical plane. They carry an optional motion vector (heading and ground-track speed) so they cross the area of operations; all position, bearing, range, and uncertainty math stays two-dimensional (see ADR 0002). The drift represents averaged sub-satellite motion over the scenario horizon, not instantaneous orbital velocity — true revisit geometry is out of scope. Ground tracks wrap at the map edge so successive orbits re-enter the area of operations and repeat passes stay meaningful.
 - The renderer may draw space markers at elevated height for visual separation. Height is presentation only; the simulation remains planar.
 
 ## Sensing from orbit
