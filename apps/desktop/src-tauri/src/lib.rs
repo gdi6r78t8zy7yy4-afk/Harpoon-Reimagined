@@ -52,6 +52,8 @@ struct CampaignProgress {
     completed_scenarios: Vec<String>,
     #[serde(default)]
     scenario_results: Vec<ScenarioResult>,
+    #[serde(default)]
+    escalation_level: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -67,6 +69,10 @@ struct ScenarioResult {
     intercepted: u16,
     #[serde(default)]
     cyber_disruptions: u16,
+    #[serde(default)]
+    space_strikes: u16,
+    #[serde(default)]
+    satellites_disabled: u16,
     misses: u16,
     aborted: u16,
 }
@@ -83,6 +89,7 @@ impl Default for CampaignProgress {
             active_scenario_id: STARTER_SCENARIO_ID.into(),
             completed_scenarios: Vec::new(),
             scenario_results: Vec::new(),
+            escalation_level: 0,
         }
     }
 }
@@ -128,6 +135,13 @@ fn record_scenario_result(progress: &mut CampaignProgress, simulation: &Simulati
         damaged: count_status("damaged"),
         intercepted: count_status("intercepted"),
         cyber_disruptions: count_status("disrupted"),
+        space_strikes: simulation
+            .engagements
+            .iter()
+            .filter(|engagement| engagement.weapon_kind == "asat")
+            .count()
+            .min(u16::MAX as usize) as u16,
+        satellites_disabled: count_status("disabled"),
         misses: count_status("miss"),
         aborted: count_status("aborted"),
     };
@@ -140,6 +154,15 @@ fn record_scenario_result(progress: &mut CampaignProgress, simulation: &Simulati
     } else {
         progress.scenario_results.push(result);
     }
+    // First use per scenario counts: cyber adds 1, disabling a satellite adds 2.
+    // Repeat strikes within one scenario do not inflate the level further.
+    progress.escalation_level = progress
+        .scenario_results
+        .iter()
+        .map(|result| {
+            u32::from(result.cyber_disruptions > 0) + u32::from(result.satellites_disabled > 0) * 2
+        })
+        .sum();
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -585,29 +608,41 @@ mod tests {
         simulation.elapsed_seconds = 12_345;
         simulation.contacts[0].identified = true;
         simulation.contacts[1].destroyed = true;
-        simulation.engagements = ["hit", "damaged", "intercepted", "disrupted", "miss", "aborted"]
-            .into_iter()
-            .enumerate()
-            .map(|(index, status)| Engagement {
-                id: index as u64 + 1,
-                elapsed_seconds: 100,
-                impact_at_seconds: 200,
-                unit_id: "ddg-01".into(),
-                unit_name: "USS ARLEIGH BURKE".into(),
-                weapon_id: format!("weapon-{index}"),
-                weapon_name: format!("Weapon {index}"),
-                weapon_kind: if status == "disrupted" { "cyber" } else { "missile" }.into(),
-                contact_id: "c-101".into(),
-                contact_label: "Hostile surface".into(),
-                hit_chance_percent: 80,
-                damage_percent: 50,
-                disruption_duration_seconds: if status == "disrupted" { 900 } else { 0 },
-                damage_applied_percent: 50,
-                intercepted_by: None,
-                status: status.into(),
-                hit: status == "hit" || status == "damaged" || status == "disrupted",
-            })
-            .collect();
+        simulation.engagements = [
+            ("hit", "missile"),
+            ("damaged", "missile"),
+            ("intercepted", "asat"),
+            ("disrupted", "cyber"),
+            ("disabled", "asat"),
+            ("miss", "missile"),
+            ("aborted", "missile"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (status, kind))| Engagement {
+            id: index as u64 + 1,
+            elapsed_seconds: 100,
+            impact_at_seconds: 200,
+            unit_id: "ddg-01".into(),
+            unit_name: "USS ARLEIGH BURKE".into(),
+            weapon_id: format!("weapon-{index}"),
+            weapon_name: format!("Weapon {index}"),
+            weapon_kind: kind.into(),
+            contact_id: "c-101".into(),
+            contact_label: "Hostile surface".into(),
+            hit_chance_percent: 80,
+            damage_percent: 50,
+            disruption_duration_seconds: if matches!(status, "disrupted" | "disabled") {
+                900
+            } else {
+                0
+            },
+            damage_applied_percent: 50,
+            intercepted_by: None,
+            status: status.into(),
+            hit: matches!(status, "hit" | "damaged" | "disrupted" | "disabled"),
+        })
+        .collect();
         let mut campaign = CampaignProgress::default();
 
         record_scenario_result(&mut campaign, &simulation);
@@ -622,19 +657,62 @@ mod tests {
         assert_eq!(result.completed_at_seconds, 12_345);
         assert_eq!(result.contacts_classified, 1);
         assert_eq!(result.targets_destroyed, 1);
-        assert_eq!(result.engagements_launched, 6);
+        assert_eq!(result.engagements_launched, 7);
         assert_eq!(result.hits, 1);
         assert_eq!(result.damaged, 1);
         assert_eq!(result.intercepted, 1);
         assert_eq!(result.cyber_disruptions, 1);
+        assert_eq!(result.space_strikes, 2);
+        assert_eq!(result.satellites_disabled, 1);
         assert_eq!(result.misses, 1);
         assert_eq!(result.aborted, 1);
+        assert_eq!(campaign.escalation_level, 3);
 
         simulation.elapsed_seconds += 60;
         record_scenario_result(&mut campaign, &simulation);
         assert_eq!(campaign.completed_scenarios.len(), 1);
         assert_eq!(campaign.scenario_results.len(), 1);
         assert_eq!(campaign.scenario_results[0].completed_at_seconds, 12_405);
+    }
+
+    #[test]
+    fn escalation_level_counts_first_use_per_scenario_without_double_counting() {
+        let engagement = |kind: &str, status: &str| Engagement {
+            id: 1,
+            elapsed_seconds: 100,
+            impact_at_seconds: 200,
+            unit_id: "ddg-01".into(),
+            unit_name: "USS ARLEIGH BURKE".into(),
+            weapon_id: "w-1".into(),
+            weapon_name: "Weapon One".into(),
+            weapon_kind: kind.into(),
+            contact_id: "c-101".into(),
+            contact_label: "Hostile surface".into(),
+            hit_chance_percent: 80,
+            damage_percent: 0,
+            disruption_duration_seconds: 900,
+            damage_applied_percent: 0,
+            intercepted_by: None,
+            status: status.into(),
+            hit: true,
+        };
+
+        let mut campaign = CampaignProgress::default();
+        let mut simulation = SimulationState::default();
+        simulation.mission_complete = true;
+        simulation.engagements = vec![engagement("asat", "disabled")];
+        record_scenario_result(&mut campaign, &simulation);
+        assert_eq!(campaign.escalation_level, 2);
+
+        // A second scenario that only used cyber adds one more level.
+        simulation.scenario_id = "second-scenario".into();
+        simulation.engagements = vec![engagement("cyber", "disrupted")];
+        record_scenario_result(&mut campaign, &simulation);
+        assert_eq!(campaign.escalation_level, 3);
+
+        // Re-recording the same scenario replaces its result without inflating.
+        record_scenario_result(&mut campaign, &simulation);
+        assert_eq!(campaign.escalation_level, 3);
     }
 
     #[test]
@@ -667,8 +745,27 @@ mod tests {
             "aborted": 0
         });
         let result: ScenarioResult =
-            serde_json::from_value(legacy).expect("pre-cyber scenario result loads");
+            serde_json::from_value(legacy.clone()).expect("pre-cyber scenario result loads");
         assert_eq!(result.cyber_disruptions, 0);
+
+        let mut with_space = legacy.clone();
+        with_space["spaceStrikes"] = serde_json::json!(2);
+        with_space["satellitesDisabled"] = serde_json::json!(1);
+        let result: ScenarioResult =
+            serde_json::from_value(with_space).expect("post-space scenario result loads");
+        assert_eq!(result.space_strikes, 2);
+        assert_eq!(result.satellites_disabled, 1);
+
+        let legacy_progress: CampaignProgress = serde_json::from_value(serde_json::json!({
+            "campaignId": "north-atlantic-patrol",
+            "title": "Northern Watch",
+            "description": "Legacy save",
+            "scenarioOrder": ["north-atlantic-intercept"],
+            "activeScenarioId": "north-atlantic-intercept",
+            "completedScenarios": []
+        }))
+        .expect("pre-escalation campaign progress loads");
+        assert_eq!(legacy_progress.escalation_level, 0);
     }
 
     #[test]
@@ -693,6 +790,8 @@ mod tests {
             damaged: 1,
             intercepted: 1,
             cyber_disruptions: 1,
+            space_strikes: 2,
+            satellites_disabled: 1,
             misses: 0,
             aborted: 0,
         });
@@ -730,6 +829,8 @@ mod tests {
         assert_eq!(restored.campaign.scenario_results[0].scenario_id, "intro");
         assert_eq!(restored.campaign.scenario_results[0].intercepted, 1);
         assert_eq!(restored.campaign.scenario_results[0].cyber_disruptions, 1);
+        assert_eq!(restored.campaign.scenario_results[0].space_strikes, 2);
+        assert_eq!(restored.campaign.scenario_results[0].satellites_disabled, 1);
         assert_eq!(restored.settings.time_scale, 15);
         assert!(!restored.settings.layers_visible);
         assert_eq!(restored.simulation.tick, simulation.tick);
