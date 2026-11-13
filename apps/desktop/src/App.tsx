@@ -176,7 +176,7 @@ function App() {
             <div className="bearing-line" />
             <div className="map-label label-west">NORWEGIAN SEA</div><div className="map-label label-east">NORTH ATLANTIC OCEAN</div>
             <div className="north-indicator"><span>N</span><div /></div>
-            {showLayers && <div className="layer-legend"><span><i className="legend-friendly" /> FRIENDLY</span><span><i className="legend-surface" /> SURFACE</span><span><i className="legend-air" /> AIR</span><span><i className="legend-sub" /> SUBSURFACE</span></div>}
+            {showLayers && <div className="layer-legend"><span><i className="legend-friendly" /> FRIENDLY</span><span><i className="legend-surface" /> SURFACE</span><span><i className="legend-air" /> AIR</span><span><i className="legend-sub" /> SUBSURFACE</span><span><i className="legend-track" /> WEAPON IN FLIGHT</span><span><i className="legend-damaged" /> DAMAGED</span><span><i className="legend-destroyed" /> DESTROYED</span><span><i className="legend-intercepted" /> INTERCEPTED</span><span><i className="legend-missed" /> MISS / ABORTED</span></div>}
             <div className="map-controls"><button aria-label="Zoom in" onClick={() => zoomMap(0.8)}><Plus size={15} /></button><button aria-label="Zoom out" onClick={() => zoomMap(1.25)}><Minus size={15} /></button><div /><button aria-label="Center map" onClick={() => window.dispatchEvent(new Event('harpoon:center'))}><LocateFixed size={15} /></button></div>
             <div className="map-scale"><span>0</span><i /><span>25 NM</span></div>
             <div className="scene-caption"><span className="caption-dot" /> LIVE SIMULATION <span>·</span> {state.units.length} FRIENDLY UNITS <span>·</span> {state.contacts.length} CONTACTS</div>

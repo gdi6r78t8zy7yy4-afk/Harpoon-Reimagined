@@ -68,12 +68,18 @@ Follow-up work can improve multi-sensor report fusion and provide richer uncerta
 - [x] Apply graduated damage until a target is disabled or destroyed.
 - **Exit:** engagements progress from a legal launch through impact and produce a persistent, reviewable outcome.
 
-## M8 — 3D combat visualization (in progress)
+## M8 — 3D combat visualization (complete)
 
 - [x] Render in-flight weapon tracks and moving projectile markers in the tactical scene.
-- [ ] Show clear impact, interception, and damage feedback in the 3D view.
-- [ ] Keep engagement visuals synchronized with simulation time and saved sessions.
+- [x] Show distinct visual feedback for hits, damage, interceptions, misses, and aborted engagements.
+- [x] Rebuild engagement visuals from saved simulation state and keep in-flight positions synchronized with simulation time.
 - **Exit:** players can follow each active engagement from launch through its resolved outcome in the tactical view.
+
+## Future weapon domains (planned)
+
+- Add cyber weapons as a gameplay domain, with disruption effects against sensors and command systems, clear duration and recovery rules, and player-visible attribution.
+- Add space weapons and orbital effects, with space-based sensors, interception, and weapon employment represented in scenarios and the tactical picture.
+- Define countermeasures, escalation, and campaign consequences for both domains before implementation.
 
 ## Ongoing quality
 

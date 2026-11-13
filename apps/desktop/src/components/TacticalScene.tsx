@@ -149,7 +149,7 @@ export function TacticalScene({ units, contacts, engagements, elapsedSeconds, se
       const material = marker.material as StandardMaterial | null
       if (material) material.emissiveColor = contact.id === selectedId ? color.scale(0.7) : color.scale(0.23)
     }
-    for (const mesh of scene.meshes.filter((item) => item.name.startsWith('engagement-track-') || item.name.startsWith('engagement-projectile-'))) {
+    for (const mesh of scene.meshes.filter((item) => item.name.startsWith('engagement-track-') || item.name.startsWith('engagement-projectile-') || item.name.startsWith('engagement-result-'))) {
       mesh.dispose(false, true)
     }
     for (const engagement of engagements) {
@@ -173,6 +173,57 @@ export function TacticalScene({ units, contacts, engagements, elapsedSeconds, se
       projectileMaterial.diffuseColor = new Color3(0.28, 0.94, 0.76)
       projectileMaterial.emissiveColor = new Color3(0.16, 0.72, 0.56)
       projectile.material = projectileMaterial
+    }
+    const recentOutcomes = engagements.filter((engagement) => engagement.status !== 'in_flight').slice(-4)
+    for (const engagement of recentOutcomes) {
+      const target = contacts.find((contact) => contact.id === engagement.contactId)
+      if (!target) continue
+      const palette = {
+        hit: new Color3(0.98, 0.31, 0.25),
+        damaged: new Color3(0.98, 0.68, 0.28),
+        intercepted: new Color3(0.35, 0.78, 0.94),
+        miss: new Color3(0.58, 0.69, 0.69),
+        aborted: new Color3(0.42, 0.5, 0.51),
+      } as const
+      const color = palette[engagement.status as keyof typeof palette]
+      if (!color) continue
+      const position = new Vector3(target.x, 0.16, target.z)
+      if (engagement.status === 'miss' || engagement.status === 'aborted') {
+        const angle = engagement.id * 2.4
+        position.x += Math.cos(angle) * 0.9
+        position.z += Math.sin(angle) * 0.9
+      }
+      const scale = engagement.status === 'damaged' ? 1 + engagement.damageAppliedPercent / 200 : 1
+      const ring = MeshBuilder.CreateTorus(`engagement-result-ring-${engagement.id}`, { diameter: 1.25 * scale, thickness: 0.045, tessellation: 32 }, scene)
+      ring.position.copyFrom(position)
+      ring.isPickable = false
+      const ringMaterial = new StandardMaterial(`engagement-result-ring-material-${engagement.id}`, scene)
+      ringMaterial.diffuseColor = color
+      ringMaterial.emissiveColor = color.scale(0.72)
+      ring.material = ringMaterial
+
+      if (engagement.status === 'hit') {
+        const core = MeshBuilder.CreateSphere(`engagement-result-core-${engagement.id}`, { diameter: 0.28, segments: 8 }, scene)
+        core.position.copyFrom(position)
+        core.position.y = 0.24
+        core.isPickable = false
+        const coreMaterial = new StandardMaterial(`engagement-result-core-material-${engagement.id}`, scene)
+        coreMaterial.diffuseColor = color
+        coreMaterial.emissiveColor = color
+        core.material = coreMaterial
+      } else if (engagement.status === 'intercepted' || engagement.status === 'miss' || engagement.status === 'aborted') {
+        const size = engagement.status === 'intercepted' ? 0.25 : 0.18
+        for (const [index, direction] of [[-1, 1], [1, 1]] as const) {
+          const line = MeshBuilder.CreateLines(`engagement-result-mark-${engagement.id}-${index}`, {
+            points: [
+              new Vector3(position.x - size, 0.25, position.z - size * direction),
+              new Vector3(position.x + size, 0.25, position.z + size * direction),
+            ],
+          }, scene)
+          line.color = color
+          line.isPickable = false
+        }
+      }
     }
   }, [units, contacts, engagements, elapsedSeconds, selectedId])
 
