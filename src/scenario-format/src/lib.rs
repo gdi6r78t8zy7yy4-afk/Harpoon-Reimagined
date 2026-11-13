@@ -69,6 +69,30 @@ pub struct SensorDefinition {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SatellitePassDefinition {
+    pub start_seconds: u64,
+    pub duration_seconds: u16,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrbitalSensorDefinition {
+    pub id: String,
+    pub name: String,
+    pub range_nm: f32,
+    pub domains: Vec<String>,
+    pub passes: Vec<SatellitePassDefinition>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroundTrackDefinition {
+    pub heading: f32,
+    pub speed_knots: u16,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScenarioContact {
     pub id: String,
     pub label: String,
@@ -81,6 +105,12 @@ pub struct ScenarioContact {
     pub identified: bool,
     #[serde(default)]
     pub defenses: Vec<DefenseSystemDefinition>,
+    #[serde(default)]
+    pub ground_track: Option<GroundTrackDefinition>,
+    #[serde(default)]
+    pub orbital_sensor: Option<OrbitalSensorDefinition>,
+    #[serde(default)]
+    pub hardening_seconds: Option<u16>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -207,26 +237,32 @@ impl ScenarioDefinition {
                         "Weapon ids and names must be non-empty and ids unique per unit",
                     );
                 }
-                let is_cyber = weapon.kind == "cyber";
-                if !matches!(weapon.kind.as_str(), "missile" | "torpedo" | "gun" | "cyber")
-                    || !weapon.range_nm.is_finite()
+                let is_effect = matches!(weapon.kind.as_str(), "cyber" | "asat");
+                let domains_valid = if weapon.kind == "asat" {
+                    weapon.domains.len() == 1 && weapon.domains[0] == "space"
+                } else {
+                    !weapon.domains.is_empty()
+                        && weapon.domains.iter().all(|domain| {
+                            matches!(domain.as_str(), "surface" | "air" | "subsurface")
+                        })
+                };
+                if !matches!(
+                    weapon.kind.as_str(),
+                    "missile" | "torpedo" | "gun" | "cyber" | "asat"
+                ) || !weapon.range_nm.is_finite()
                     || weapon.range_nm <= 0.0
                     || weapon.range_nm > 1000.0
-                    || weapon.domains.is_empty()
-                    || weapon
-                        .domains
-                        .iter()
-                        .any(|domain| !matches!(domain.as_str(), "surface" | "air" | "subsurface"))
+                    || !domains_valid
                     || weapon.ammunition == 0
                     || weapon.hit_chance_percent == 0
                     || weapon.hit_chance_percent > 100
                     || weapon.speed_knots == 0
                     || weapon.speed_knots > 5000
                     || weapon.damage_percent > 100
-                    || (is_cyber
+                    || (is_effect
                         && (weapon.damage_percent != 0
                             || !(60..=7200).contains(&weapon.effect_duration_seconds)))
-                    || (!is_cyber
+                    || (!is_effect
                         && (weapon.damage_percent == 0 || weapon.effect_duration_seconds != 0))
                 {
                     return invalid("Weapon type, range, ammunition, accuracy, speed, damage, effect duration, or domain is outside supported limits");
@@ -250,8 +286,8 @@ impl ScenarioDefinition {
                     "Contact confidence, bearing, or range is outside supported limits",
                 );
             }
-            if !matches!(contact.domain.as_str(), "surface" | "air" | "subsurface") {
-                return invalid("Contact domain must be surface, air, or subsurface");
+            if !matches!(contact.domain.as_str(), "surface" | "air" | "subsurface" | "space") {
+                return invalid("Contact domain must be surface, air, subsurface, or space");
             }
             if !valid_position(&contact.position) {
                 return invalid("Contact position must be finite and within 50 map units");
@@ -268,6 +304,57 @@ impl ScenarioDefinition {
                 {
                     return invalid("Defensive system identity, charges, or interception chance is outside supported limits");
                 }
+            }
+
+            if contact.domain == "space" {
+                if let Some(ground_track) = &contact.ground_track {
+                    if !(0.0..360.0).contains(&ground_track.heading)
+                        || ground_track.speed_knots == 0
+                        || ground_track.speed_knots > 600
+                    {
+                        return invalid("Ground-track heading or drift speed is outside supported limits");
+                    }
+                }
+                if contact.hardening_seconds.unwrap_or(600) > 3600 {
+                    return invalid("Hardening cooldown must not exceed 3600 seconds");
+                }
+                if let Some(sensor) = &contact.orbital_sensor {
+                    if sensor.id.trim().is_empty() || sensor.name.trim().is_empty() {
+                        return invalid("Orbital sensor ids and names must not be empty");
+                    }
+                    if !sensor.range_nm.is_finite()
+                        || sensor.range_nm <= 0.0
+                        || sensor.range_nm > 1000.0
+                        || sensor.domains.is_empty()
+                        || sensor
+                            .domains
+                            .iter()
+                            .any(|domain| !matches!(domain.as_str(), "surface" | "air"))
+                    {
+                        return invalid("Orbital sensor range or domain is outside supported limits");
+                    }
+                    if sensor.passes.is_empty() || sensor.passes.len() > 8 {
+                        return invalid("A satellite needs between 1 and 8 pass windows");
+                    }
+                    let mut previous_end = 0_u64;
+                    for (index, pass) in sensor.passes.iter().enumerate() {
+                        let end =
+                            pass.start_seconds.saturating_add(u64::from(pass.duration_seconds));
+                        if pass.duration_seconds < 60
+                            || pass.duration_seconds > 3600
+                            || end > 86_400
+                            || (index > 0 && pass.start_seconds < previous_end)
+                        {
+                            return invalid("Satellite pass windows must be 60 to 3600 seconds, sorted, non-overlapping, and within 24 hours");
+                        }
+                        previous_end = end;
+                    }
+                }
+            } else if contact.ground_track.is_some()
+                || contact.orbital_sensor.is_some()
+                || contact.hardening_seconds.is_some()
+            {
+                return invalid("Ground-track motion, orbital sensors, and hardening apply only to space contacts");
             }
         }
 
@@ -349,12 +436,23 @@ fn valid_position(position: &Position) -> bool {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CampaignConsequenceDefinition {
+    pub id: String,
+    pub min_escalation: u16,
+    pub title: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CampaignDefinition {
     pub schema_version: u16,
     pub campaign_id: String,
     pub title: String,
     pub description: String,
     pub scenarios: Vec<String>,
+    #[serde(default)]
+    pub consequences: Vec<CampaignConsequenceDefinition>,
 }
 
 impl CampaignDefinition {
@@ -393,6 +491,28 @@ impl CampaignDefinition {
             return Err(ScenarioError(
                 "Campaign scenario ids must be non-empty and unique".into(),
             ));
+        }
+        if self.consequences.len() > 8 {
+            return Err(ScenarioError(
+                "A campaign cannot contain more than 8 consequences".into(),
+            ));
+        }
+        let mut consequence_ids = HashSet::new();
+        for consequence in &self.consequences {
+            if consequence.id.trim().is_empty()
+                || consequence.title.trim().is_empty()
+                || consequence.description.trim().is_empty()
+                || !consequence_ids.insert(consequence.id.as_str())
+            {
+                return Err(ScenarioError(
+                    "Campaign consequence ids, titles, and descriptions must be non-empty and unique".into(),
+                ));
+            }
+            if consequence.min_escalation == 0 {
+                return Err(ScenarioError(
+                    "Campaign consequence thresholds must be at least escalation level 1".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -456,6 +576,142 @@ mod tests {
 
         value["contacts"][0]["position"] = json!({ "x": 5.0, "z": -1.5 });
         ScenarioDefinition::parse(&value.to_string()).expect("sea starts are valid");
+    }
+
+    fn space_contact() -> serde_json::Value {
+        json!({
+            "id": "sat-1",
+            "label": "COSMOS 2547",
+            "classification": "Unknown",
+            "confidence": 60,
+            "bearing": 90,
+            "rangeNm": 300.0,
+            "domain": "space",
+            "position": { "x": -30.0, "z": -30.0 },
+            "identified": false,
+            "groundTrack": { "heading": 85.0, "speedKnots": 240 },
+            "hardeningSeconds": 900,
+            "orbitalSensor": {
+                "id": "sar-1",
+                "name": "SAR swath",
+                "rangeNm": 600.0,
+                "domains": ["surface", "air"],
+                "passes": [
+                    { "startSeconds": 3600, "durationSeconds": 900 },
+                    { "startSeconds": 7200, "durationSeconds": 900 }
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn space_contacts_validate_ground_tracks_and_pass_windows() {
+        let mut value: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        value["contacts"][0] = space_contact();
+        let parsed =
+            ScenarioDefinition::parse(&value.to_string()).expect("satellite contact is valid");
+        assert_eq!(parsed.contacts[0].domain, "space");
+
+        value["contacts"][0]["groundTrack"]["speedKnots"] = json!(700);
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Ground-track heading or drift speed"));
+
+        value["contacts"][0]["groundTrack"]["speedKnots"] = json!(240);
+        value["contacts"][0]["orbitalSensor"]["passes"][1]["startSeconds"] = json!(4000);
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("pass windows must be 60 to 3600"));
+
+        value["contacts"][0]["orbitalSensor"]["passes"][1]["startSeconds"] = json!(7200);
+        value["contacts"][0]["orbitalSensor"]["domains"] = json!(["surface", "subsurface"]);
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Orbital sensor range or domain"));
+
+        value["contacts"][0]["orbitalSensor"]["domains"] = json!(["surface"]);
+        value["contacts"][1]["groundTrack"] = json!({ "heading": 90.0, "speedKnots": 240 });
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("apply only to space contacts"));
+    }
+
+    #[test]
+    fn asat_weapons_are_space_only_effect_weapons() {
+        let mut value: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        value["contacts"][0] = space_contact();
+        value["units"][0]["weapons"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "id": "asat-1",
+                "name": "SM-3 ERAM",
+                "kind": "asat",
+                "rangeNm": 900.0,
+                "domains": ["space"],
+                "ammunition": 4,
+                "hitChancePercent": 70,
+                "speedKnots": 4500,
+                "damagePercent": 0,
+                "effectDurationSeconds": 1800
+            }));
+        ScenarioDefinition::parse(&value.to_string()).expect("asat loadout is valid");
+
+        value["units"][0]["weapons"][3]["domains"] = json!(["space", "air"]);
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Weapon type, range, ammunition"));
+
+        value["units"][0]["weapons"][3]["domains"] = json!(["space"]);
+        value["units"][0]["weapons"][3]["damagePercent"] = json!(50);
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Weapon type, range, ammunition"));
+
+        value["units"][0]["weapons"][3]["damagePercent"] = json!(0);
+        value["units"][0]["weapons"][2]["domains"] = json!(["surface", "space"]);
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Weapon type, range, ammunition"));
+    }
+
+    #[test]
+    fn campaign_consequences_are_optional_and_validated() {
+        let campaign = CampaignDefinition::parse(CAMPAIGN)
+            .expect("campaign without consequences remains valid");
+        assert!(campaign.consequences.is_empty());
+
+        let mut value: serde_json::Value = serde_json::from_str(CAMPAIGN).unwrap();
+        value["consequences"] = json!([{
+            "id": "isr-restricted",
+            "minEscalation": 1,
+            "title": "Allied ISR restricted",
+            "description": "Partners withhold orbital tasking after counterspace strikes."
+        }]);
+        let campaign =
+            CampaignDefinition::parse(&value.to_string()).expect("authored consequence is valid");
+        assert_eq!(campaign.consequences.len(), 1);
+
+        value["consequences"][0]["minEscalation"] = json!(0);
+        let error = CampaignDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("thresholds must be at least escalation level 1"));
+
+        value["consequences"][0]["minEscalation"] = json!(2);
+        let duplicate = value["consequences"][0].clone();
+        value["consequences"].as_array_mut().unwrap().push(duplicate);
+        let error = CampaignDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("consequence ids, titles, and descriptions"));
     }
 
     #[test]
