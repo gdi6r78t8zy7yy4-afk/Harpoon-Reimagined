@@ -34,13 +34,13 @@ The native play-through confirmed pacing but surfaced presentation gaps: the tac
 - [x] Confirm native save/load across an application restart and refine the campaign flow.
 - **Exit:** a campaign can be resumed after closing the application.
 
-## M4 — Simulation depth and content tools
+## M4 — Simulation depth and content tools (in progress)
 
 - [x] Add data-driven unit sensor profiles and deterministic sensor sweeps that refresh in-range contact tracks.
 - [x] Add a repeatable CLI workflow for validating scenario and campaign content.
+- [x] Render authored coastlines for land/water separation in the tactical chart and make camera pan controls discoverable.
+- [x] Document scenario authoring rules, validation limits, and the repeatable content workflow in [authoring notes](../game-design/scenario-authoring.md).
 - Expand sensor, weapon, and domain behavior based on validated design priorities.
-- Improve scenario authoring, validation, and 3D presentation.
-- Render authored coastlines for land/water separation in the tactical chart and make camera pan controls discoverable.
 - **Exit:** content can be authored and reviewed with repeatable workflows.
 
 ## M5 — Situational awareness (complete)

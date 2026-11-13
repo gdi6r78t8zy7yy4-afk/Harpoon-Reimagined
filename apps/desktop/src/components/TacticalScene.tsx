@@ -9,9 +9,9 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Engine } from '@babylonjs/core/Engines/engine'
 import { Scene } from '@babylonjs/core/scene'
-import type { Contact, Engagement, Unit } from '../types'
+import type { Coastline, Contact, Engagement, Unit } from '../types'
 
-type Props = { units: Unit[]; contacts: Contact[]; engagements: Engagement[]; elapsedSeconds: number; selectedId: string; onSelect: (id: string) => void }
+type Props = { units: Unit[]; contacts: Contact[]; engagements: Engagement[]; coastlines: Coastline[]; elapsedSeconds: number; selectedId: string; onSelect: (id: string) => void }
 
 function ship(scene: Scene, unit: Unit, selected: boolean) {
   const group = new Mesh(`unit-${unit.id}`, scene)
@@ -52,7 +52,7 @@ function contactMarker(scene: Scene, contact: Contact, selected: boolean) {
   return marker
 }
 
-export function TacticalScene({ units, contacts, engagements, elapsedSeconds, selectedId, onSelect }: Props) {
+export function TacticalScene({ units, contacts, engagements, coastlines, elapsedSeconds, selectedId, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const selectRef = useRef(onSelect)
   const sceneRef = useRef<Scene | null>(null)
@@ -94,6 +94,22 @@ export function TacticalScene({ units, contacts, engagements, elapsedSeconds, se
       const vertical = MeshBuilder.CreateLines(`grid-v-${i}`, { points: [new Vector3(i * 2, 0.018, -18), new Vector3(i * 2, 0.018, 18)] }, scene)
       vertical.color = new Color3(0.13, 0.33, 0.33)
       vertical.alpha = 0.25
+    }
+
+    for (const coastline of coastlines) {
+      const land = MeshBuilder.CreatePolygon(`coastline-${coastline.id}`, { shape: coastline.points.map((point) => new Vector3(point.x, 0, point.z)), sideOrientation: Mesh.DOUBLESIDE }, scene)
+      land.position.y = 0.03
+      const landMaterial = new StandardMaterial(`coastline-material-${coastline.id}`, scene)
+      landMaterial.diffuseColor = new Color3(0.16, 0.2, 0.15)
+      landMaterial.emissiveColor = new Color3(0.045, 0.06, 0.04)
+      landMaterial.specularColor = new Color3(0.05, 0.08, 0.07)
+      land.material = landMaterial
+      const outlinePoints = coastline.points.map((point) => new Vector3(point.x, 0.045, point.z))
+      outlinePoints.push(outlinePoints[0].clone())
+      const outline = MeshBuilder.CreateLines(`coastline-outline-${coastline.id}`, { points: outlinePoints }, scene)
+      outline.color = new Color3(0.5, 0.62, 0.44)
+      outline.alpha = 0.85
+      outline.isPickable = false
     }
 
     sceneRef.current = scene
@@ -229,5 +245,5 @@ export function TacticalScene({ units, contacts, engagements, elapsedSeconds, se
     }
   }, [units, contacts, engagements, elapsedSeconds, selectedId])
 
-  return <canvas ref={canvasRef} className="tactical-canvas" aria-label="Interactive 3D tactical map" />
+  return <canvas ref={canvasRef} className="tactical-canvas" aria-label="Interactive 3D tactical map" onContextMenu={(event) => event.preventDefault()} />
 }

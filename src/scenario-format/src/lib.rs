@@ -95,6 +95,14 @@ pub struct ScenarioObjective {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CoastlineDefinition {
+    pub id: String,
+    pub name: String,
+    pub points: Vec<Position>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScenarioDefinition {
     pub schema_version: u16,
     pub id: String,
@@ -104,6 +112,8 @@ pub struct ScenarioDefinition {
     pub units: Vec<ScenarioUnit>,
     pub contacts: Vec<ScenarioContact>,
     pub objectives: Vec<ScenarioObjective>,
+    #[serde(default)]
+    pub coastlines: Vec<CoastlineDefinition>,
 }
 
 #[derive(Debug)]
@@ -278,8 +288,56 @@ impl ScenarioDefinition {
                 return invalid("Objective kind or required contact count is unsupported");
             }
         }
+
+        let mut coastline_ids = HashSet::new();
+        for coastline in &self.coastlines {
+            if coastline.id.trim().is_empty()
+                || coastline.name.trim().is_empty()
+                || !coastline_ids.insert(coastline.id.as_str())
+            {
+                return invalid("Coastline ids and names must be non-empty and unique");
+            }
+            if coastline.points.len() < 3
+                || coastline.points.len() > 64
+                || coastline.points.iter().any(|point| !valid_position(point))
+            {
+                return invalid(
+                    "Coastline polygons need between 3 and 64 finite points within 50 map units",
+                );
+            }
+        }
+        if self.coastlines.len() > 12 {
+            return invalid("A scenario cannot contain more than 12 coastlines");
+        }
+        let starts_on_land = self
+            .units
+            .iter()
+            .map(|unit| &unit.position)
+            .chain(self.contacts.iter().map(|contact| &contact.position))
+            .any(|position| {
+                self.coastlines
+                    .iter()
+                    .any(|coastline| point_in_polygon(position, &coastline.points))
+            });
+        if starts_on_land {
+            return invalid("Units and contacts must not start on land");
+        }
         Ok(())
     }
+}
+
+fn point_in_polygon(position: &Position, polygon: &[Position]) -> bool {
+    let mut inside = false;
+    for (index, vertex) in polygon.iter().enumerate() {
+        let next = &polygon[(index + 1) % polygon.len()];
+        if (vertex.z > position.z) != (next.z > position.z)
+            && position.x
+                < (next.x - vertex.x) * (position.z - vertex.z) / (next.z - vertex.z) + vertex.x
+        {
+            inside = !inside;
+        }
+    }
+    inside
 }
 
 fn valid_position(position: &Position) -> bool {
@@ -343,6 +401,7 @@ impl CampaignDefinition {
 #[cfg(test)]
 mod tests {
     use super::{CampaignDefinition, ScenarioDefinition};
+    use serde_json::json;
 
     const SCENARIO: &str = include_str!("../../../scenarios/north-atlantic-intercept.json");
     const CAMPAIGN: &str = include_str!("../../../campaigns/northern-watch.json");
@@ -353,6 +412,50 @@ mod tests {
         assert_eq!(scenario.id, "north-atlantic-intercept");
         assert_eq!(scenario.units.len(), 3);
         assert_eq!(scenario.contacts.len(), 3);
+        assert_eq!(scenario.coastlines.len(), 3);
+    }
+
+    #[test]
+    fn coastlines_are_optional_and_polygons_stay_valid() {
+        let mut without_land: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        without_land.as_object_mut().unwrap().remove("coastlines");
+        let parsed = ScenarioDefinition::parse(&without_land.to_string())
+            .expect("scenarios authored before coastlines remain valid");
+        assert!(parsed.coastlines.is_empty());
+
+        let mut degenerate: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        degenerate["coastlines"][0]["points"] = json!([{ "x": 1.0, "z": 1.0 }]);
+        let error = ScenarioDefinition::parse(&degenerate.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Coastline polygons need between 3 and 64"));
+
+        let mut duplicate: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        duplicate["coastlines"][1]["id"] = json!("norwegian-coast");
+        let error = ScenarioDefinition::parse(&duplicate.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Coastline ids and names must be non-empty and unique"));
+    }
+
+    #[test]
+    fn rejects_units_and_contacts_starting_on_land() {
+        let mut value: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        value["units"][0]["position"] = json!({ "x": 30.0, "z": 0.0 });
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Units and contacts must not start on land"));
+
+        value["units"][0]["position"] = json!({ "x": -5.0, "z": 2.0 });
+        value["contacts"][0]["position"] = json!({ "x": 11.0, "z": -10.0 });
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Units and contacts must not start on land"));
+
+        value["contacts"][0]["position"] = json!({ "x": 5.0, "z": -1.5 });
+        ScenarioDefinition::parse(&value.to_string()).expect("sea starts are valid");
     }
 
     #[test]

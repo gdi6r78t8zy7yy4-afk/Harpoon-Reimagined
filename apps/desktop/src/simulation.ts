@@ -1,11 +1,13 @@
 import { invoke } from '@tauri-apps/api/core'
 import scenario from './data/north-atlantic-intercept.json'
 import campaignDefinition from './data/northern-watch.json'
-import type { CampaignProgress, CampaignSession, CampaignSettings, CampaignStatus, Contact, SimulationState, Unit } from './types'
+import type { CampaignProgress, CampaignSession, CampaignSettings, CampaignStatus, Coastline, Contact, SimulationState, Unit } from './types'
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
 }
+
+export const scenarioCoastlines: Coastline[] = scenario.coastlines
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
 type ScenarioDefense = { id: string; name: string; charges: number; interceptChancePercent: number }

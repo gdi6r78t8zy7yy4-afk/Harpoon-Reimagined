@@ -152,6 +152,12 @@ export type ScenarioResult = {
   aborted: number
 }
 
+export type Coastline = {
+  id: string
+  name: string
+  points: { x: number; z: number }[]
+}
+
 export type CampaignSettings = {
   timeScale: number
   layersVisible: boolean

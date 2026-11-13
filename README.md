@@ -47,7 +47,7 @@ Run `./scripts/validate-content.sh` to validate every JSON scenario and campaign
 
 ## Status
 
-The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems and multiple authored scenarios remain future work. The first campaign slice now tracks progression and local save/load, verified across an application restart in the native macOS build, and cyber weapons can suppress a hostile's defensive systems for a bounded window.
+The repository contains the project foundation and an early interactive prototype with one playable objective. Broader combat systems and multiple authored scenarios remain future work. The first campaign slice now tracks progression and local save/load, verified across an application restart in the native macOS build, cyber weapons can suppress a hostile's defensive systems for a bounded window, and the tactical chart renders authored coastlines from scenario data.
 
 ## Contributing
 
