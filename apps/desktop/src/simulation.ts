@@ -8,7 +8,8 @@ declare global {
 }
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
-type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed'> & { position: { x: number; z: number } }
+type ScenarioDefense = { id: string; name: string; charges: number; interceptChancePercent: number }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed' | 'health' | 'defenses'> & { position: { x: number; z: number }; defenses: ScenarioDefense[] }
 
 const initialRangeUncertainty = (confidence: number) => 1 + (100 - confidence) * 0.12
 const initialBearingUncertainty = (confidence: number) => 2 + (100 - confidence) * 0.5
@@ -36,7 +37,7 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false, health: 100, defenses: (contact.defenses ?? []).map(({ charges, ...defense }) => ({ ...defense, remainingCharges: charges })) })),
     engagements: [],
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
@@ -77,6 +78,9 @@ browserState.running = false
 function normalizeBrowserContacts(state: SimulationState) {
   for (const unit of state.units) {
     if (!Array.isArray(unit.weapons)) unit.weapons = []
+    for (const weapon of unit.weapons) {
+      if (!Number.isFinite(weapon.damagePercent) || weapon.damagePercent <= 0) weapon.damagePercent = 100
+    }
   }
   for (const contact of state.contacts) {
     if (!Number.isFinite(contact.lastReportedSeconds) || contact.lastReportedSeconds === 0) {
@@ -95,8 +99,17 @@ function normalizeBrowserContacts(state: SimulationState) {
     if (!Array.isArray(contact.reportHistory)) contact.reportHistory = []
     if (!Array.isArray(contact.correlatedContactIds)) contact.correlatedContactIds = []
     if (typeof contact.destroyed !== 'boolean') contact.destroyed = false
+    if (!Number.isFinite(contact.health)) contact.health = 100
+    if (!Array.isArray(contact.defenses)) contact.defenses = []
+    if (contact.destroyed) contact.health = 0
+    else if (contact.health <= 0) contact.destroyed = true
   }
   if (!Array.isArray(state.engagements)) state.engagements = []
+  for (const engagement of state.engagements) {
+    if (!Number.isFinite(engagement.damagePercent) || engagement.damagePercent <= 0) engagement.damagePercent = 100
+    if (!Number.isFinite(engagement.damageAppliedPercent)) engagement.damageAppliedPercent = 0
+    if (typeof engagement.interceptedBy !== 'string') engagement.interceptedBy = null
+  }
 }
 normalizeBrowserContacts(browserState)
 let browserCampaign = loadedBrowserSave?.campaign ?? defaultCampaign()
@@ -182,8 +195,26 @@ export async function advance(seconds = 60) {
     if (engagement.status !== 'in_flight' || engagement.impactAtSeconds > browserState.elapsedSeconds) continue
     const target = browserState.contacts.find((item) => item.id === engagement.contactId)
     if (engagement.hit && target && !target.destroyed) {
-      target.destroyed = true
-      engagement.status = 'hit'
+      const survival = target.defenses.filter((defense) => defense.remainingCharges > 0).reduce(
+        (chance, defense) => Math.floor(chance * (100 - defense.interceptChancePercent) / 100),
+        100,
+      )
+      const contactSalt = [...target.id].reduce((sum, character) => sum + character.charCodeAt(0), 0)
+      const defenseRoll = (engagement.impactAtSeconds + engagement.id * 19 + contactSalt) % 100
+      if (defenseRoll < 100 - survival) {
+        const defense = target.defenses.find((item) => item.remainingCharges > 0)
+        if (defense) {
+          defense.remainingCharges -= 1
+          engagement.interceptedBy = defense.name
+        }
+        engagement.hit = false
+        engagement.status = 'intercepted'
+      } else {
+        engagement.damageAppliedPercent = Math.min(target.health, engagement.damagePercent)
+        target.health = Math.max(0, target.health - engagement.damagePercent)
+        target.destroyed = target.health === 0
+        engagement.status = target.destroyed ? 'hit' : 'damaged'
+      }
     } else if (engagement.hit) {
       engagement.hit = false
       engagement.status = 'aborted'
@@ -192,6 +223,10 @@ export async function advance(seconds = 60) {
     }
     const message = engagement.status === 'hit'
       ? `${engagement.weaponName} hit ${engagement.contactLabel}`
+      : engagement.status === 'damaged'
+        ? `${engagement.weaponName} damaged ${engagement.contactLabel} (${engagement.damageAppliedPercent}% damage)`
+        : engagement.status === 'intercepted'
+          ? `${engagement.weaponName} intercepted by ${engagement.interceptedBy ?? 'defenses'} protecting ${engagement.contactLabel}`
       : engagement.status === 'miss'
         ? `${engagement.weaponName} missed ${engagement.contactLabel}`
         : `${engagement.weaponName} impact aborted; ${engagement.contactLabel} is no longer active`
@@ -334,7 +369,7 @@ export async function fireWeapon(unitId: string, weaponId: string, contactId: st
   const roll = (browserState.elapsedSeconds + browserState.tick * 17 + id * 31 + idSalt) % 100
   const hit = roll < hitChancePercent
   browserState.units[unitIndex].weapons[weaponIndex].ammunition -= 1
-  browserState.engagements.push({ id, elapsedSeconds: browserState.elapsedSeconds, impactAtSeconds: browserState.elapsedSeconds + flightSeconds, unitId, unitName: unit.name, weaponId, weaponName: weapon.name, contactId, contactLabel: contact.label, hitChancePercent, status: 'in_flight', hit })
+  browserState.engagements.push({ id, elapsedSeconds: browserState.elapsedSeconds, impactAtSeconds: browserState.elapsedSeconds + flightSeconds, unitId, unitName: unit.name, weaponId, weaponName: weapon.name, contactId, contactLabel: contact.label, hitChancePercent, damagePercent: weapon.damagePercent, damageAppliedPercent: 0, interceptedBy: null, status: 'in_flight', hit })
   browserState.engagements = browserState.engagements.slice(-50)
   addEvent(`${weapon.name} launched at ${contact.label} (${hitChancePercent}% solution)`, unit.name)
   return structuredClone(browserState)

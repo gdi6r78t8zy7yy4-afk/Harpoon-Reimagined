@@ -30,6 +30,14 @@ export type Weapon = {
   ammunition: number
   hitChancePercent: number
   speedKnots: number
+  damagePercent: number
+}
+
+export type DefenseSystem = {
+  id: string
+  name: string
+  remainingCharges: number
+  interceptChancePercent: number
 }
 
 export type Contact = {
@@ -43,6 +51,8 @@ export type Contact = {
   x: number
   z: number
   identified: boolean
+  health: number
+  defenses: DefenseSystem[]
   lastReportedSeconds: number
   confidenceAtLastReport: number
   rangeUncertaintyNm: number
@@ -106,7 +116,10 @@ export type Engagement = {
   contactId: string
   contactLabel: string
   hitChancePercent: number
-  status: 'in_flight' | 'hit' | 'miss' | 'aborted'
+  damagePercent: number
+  damageAppliedPercent: number
+  interceptedBy: string | null
+  status: 'in_flight' | 'hit' | 'damaged' | 'miss' | 'intercepted' | 'aborted'
   hit: boolean
 }
 

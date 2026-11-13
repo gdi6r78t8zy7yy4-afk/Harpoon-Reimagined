@@ -38,6 +38,21 @@ pub struct WeaponDefinition {
     pub ammunition: u16,
     pub hit_chance_percent: u8,
     pub speed_knots: u16,
+    #[serde(default = "default_weapon_damage_percent")]
+    pub damage_percent: u8,
+}
+
+fn default_weapon_damage_percent() -> u8 {
+    100
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefenseSystemDefinition {
+    pub id: String,
+    pub name: String,
+    pub charges: u8,
+    pub intercept_chance_percent: u8,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -62,6 +77,8 @@ pub struct ScenarioContact {
     pub domain: String,
     pub position: Position,
     pub identified: bool,
+    #[serde(default)]
+    pub defenses: Vec<DefenseSystemDefinition>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -192,8 +209,10 @@ impl ScenarioDefinition {
                     || weapon.hit_chance_percent > 100
                     || weapon.speed_knots == 0
                     || weapon.speed_knots > 5000
+                    || weapon.damage_percent == 0
+                    || weapon.damage_percent > 100
                 {
-                    return invalid("Weapon type, range, ammunition, accuracy, or domain is outside supported limits");
+                    return invalid("Weapon type, range, ammunition, accuracy, speed, damage, or domain is outside supported limits");
                 }
             }
         }
@@ -219,6 +238,19 @@ impl ScenarioDefinition {
             }
             if !valid_position(&contact.position) {
                 return invalid("Contact position must be finite and within 50 map units");
+            }
+            let mut defense_ids = HashSet::new();
+            for defense in &contact.defenses {
+                if defense.id.trim().is_empty()
+                    || defense.name.trim().is_empty()
+                    || !defense_ids.insert(defense.id.as_str())
+                    || defense.charges == 0
+                    || defense.charges > 20
+                    || defense.intercept_chance_percent == 0
+                    || defense.intercept_chance_percent > 100
+                {
+                    return invalid("Defensive system identity, charges, or interception chance is outside supported limits");
+                }
             }
         }
 
@@ -337,12 +369,18 @@ mod tests {
         let scenario = ScenarioDefinition::parse(SCENARIO).expect("weapon loadouts are valid");
         assert_eq!(scenario.units[0].weapons.len(), 2);
 
+        let legacy_scenario = SCENARIO.replace(", \"damagePercent\": 80", "");
+        let legacy =
+            ScenarioDefinition::parse(&legacy_scenario).expect("older weapon data remains valid");
+        assert_eq!(legacy.units[0].weapons[0].damage_percent, 100);
+
         let invalid_accuracy =
             SCENARIO.replace("\"hitChancePercent\": 78", "\"hitChancePercent\": 101");
         let error = ScenarioDefinition::parse(&invalid_accuracy).unwrap_err();
         assert!(error
             .to_string()
-            .contains("Weapon type, range, ammunition, accuracy, or domain"));
+            .to_string()
+            .contains("Weapon type, range, ammunition, accuracy, speed, damage"));
     }
 
     #[test]

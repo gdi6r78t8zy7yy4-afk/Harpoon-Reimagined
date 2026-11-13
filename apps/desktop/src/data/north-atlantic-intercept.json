@@ -20,8 +20,8 @@
         { "id": "sps-1", "name": "SPS-73 surface search", "kind": "radar", "rangeNm": 55, "domains": ["surface"] }
       ],
       "weapons": [
-        { "id": "sm-6", "name": "SM-6", "kind": "missile", "rangeNm": 120, "domains": ["air"], "ammunition": 8, "hitChancePercent": 78, "speedKnots": 2000 },
-        { "id": "harpoon", "name": "Harpoon", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 72, "speedKnots": 550 }
+        { "id": "sm-6", "name": "SM-6", "kind": "missile", "rangeNm": 120, "domains": ["air"], "ammunition": 8, "hitChancePercent": 78, "speedKnots": 2000, "damagePercent": 80 },
+        { "id": "harpoon", "name": "Harpoon", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 72, "speedKnots": 550, "damagePercent": 100 }
       ]
     },
     {
@@ -39,7 +39,7 @@
         { "id": "bqq-2", "name": "BQQ-10 active sonar", "kind": "sonar", "rangeNm": 90, "domains": ["subsurface"] }
       ],
       "weapons": [
-        { "id": "mk-48", "name": "Mk 48 ADCAP", "kind": "torpedo", "rangeNm": 25, "domains": ["surface", "subsurface"], "ammunition": 6, "hitChancePercent": 70, "speedKnots": 55 }
+        { "id": "mk-48", "name": "Mk 48 ADCAP", "kind": "torpedo", "rangeNm": 25, "domains": ["surface", "subsurface"], "ammunition": 6, "hitChancePercent": 70, "speedKnots": 55, "damagePercent": 100 }
       ]
     },
     {
@@ -57,8 +57,8 @@
         { "id": "hull-sonar", "name": "Hull sonar", "kind": "sonar", "rangeNm": 30, "domains": ["subsurface"] }
       ],
       "weapons": [
-        { "id": "nsm", "name": "Naval Strike Missile", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 74, "speedKnots": 550 },
-        { "id": "essm", "name": "ESSM", "kind": "missile", "rangeNm": 35, "domains": ["air"], "ammunition": 16, "hitChancePercent": 80, "speedKnots": 2000 }
+        { "id": "nsm", "name": "Naval Strike Missile", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 74, "speedKnots": 550, "damagePercent": 100 },
+        { "id": "essm", "name": "ESSM", "kind": "missile", "rangeNm": 35, "domains": ["air"], "ammunition": 16, "hitChancePercent": 80, "speedKnots": 2000, "damagePercent": 55 }
       ]
     }
   ],
@@ -72,7 +72,8 @@
       "rangeNm": 38.4,
       "domain": "surface",
       "position": { "x": 5, "z": -1.5 },
-      "identified": false
+      "identified": false,
+      "defenses": [{ "id": "surface-decoys", "name": "Surface decoys", "charges": 1, "interceptChancePercent": 20 }]
     },
     {
       "id": "c-102",
@@ -83,7 +84,8 @@
       "rangeNm": 62.1,
       "domain": "air",
       "position": { "x": 3, "z": -7 },
-      "identified": false
+      "identified": false,
+      "defenses": [{ "id": "air-countermeasures", "name": "Air countermeasures", "charges": 2, "interceptChancePercent": 30 }]
     },
     {
       "id": "c-103",
@@ -94,7 +96,8 @@
       "rangeNm": 17.8,
       "domain": "subsurface",
       "position": { "x": 1.5, "z": 7 },
-      "identified": false
+      "identified": false,
+      "defenses": [{ "id": "acoustic-decoys", "name": "Acoustic decoys", "charges": 2, "interceptChancePercent": 25 }]
     }
   ],
   "objectives": [

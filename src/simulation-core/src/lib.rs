@@ -1,4 +1,6 @@
-use harpoon_scenario_format::{ScenarioDefinition, SensorDefinition, WeaponDefinition};
+use harpoon_scenario_format::{
+    DefenseSystemDefinition, ScenarioDefinition, SensorDefinition, WeaponDefinition,
+};
 use serde::{Deserialize, Serialize};
 
 const STARTER_SCENARIO: &str = include_str!("../../../scenarios/north-atlantic-intercept.json");
@@ -34,6 +36,10 @@ pub struct Contact {
     pub x: f32,
     pub z: f32,
     pub identified: bool,
+    #[serde(default = "default_contact_health")]
+    pub health: u8,
+    #[serde(default)]
+    pub defenses: Vec<DefenseSystem>,
     #[serde(default)]
     pub last_reported_seconds: u64,
     #[serde(default)]
@@ -54,6 +60,23 @@ pub struct Contact {
     pub correlated_contact_ids: Vec<String>,
     #[serde(default)]
     pub destroyed: bool,
+}
+
+fn default_contact_health() -> u8 {
+    100
+}
+
+fn default_legacy_damage_percent() -> u8 {
+    100
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefenseSystem {
+    pub id: String,
+    pub name: String,
+    pub remaining_charges: u8,
+    pub intercept_chance_percent: u8,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -80,6 +103,12 @@ pub struct Engagement {
     pub contact_id: String,
     pub contact_label: String,
     pub hit_chance_percent: u8,
+    #[serde(default = "default_legacy_damage_percent")]
+    pub damage_percent: u8,
+    #[serde(default)]
+    pub damage_applied_percent: u8,
+    #[serde(default)]
+    pub intercepted_by: Option<String>,
     pub status: String,
     pub hit: bool,
 }
@@ -189,6 +218,17 @@ impl SimulationState {
                 x: contact.position.x,
                 z: contact.position.z,
                 identified: contact.identified,
+                health: 100,
+                defenses: contact
+                    .defenses
+                    .into_iter()
+                    .map(|defense: DefenseSystemDefinition| DefenseSystem {
+                        id: defense.id,
+                        name: defense.name,
+                        remaining_charges: defense.charges,
+                        intercept_chance_percent: defense.intercept_chance_percent,
+                    })
+                    .collect(),
                 last_reported_seconds: start_time_seconds,
                 confidence_at_last_report: contact.confidence,
                 range_uncertainty_nm: initial_range_uncertainty(contact.confidence),
@@ -245,6 +285,11 @@ impl SimulationState {
 
     pub fn normalize_legacy_track_metadata(&mut self) {
         for contact in &mut self.contacts {
+            if contact.destroyed {
+                contact.health = 0;
+            } else if contact.health == 0 {
+                contact.destroyed = true;
+            }
             if contact.last_reported_seconds == 0 {
                 contact.last_reported_seconds = self.elapsed_seconds;
                 contact.confidence_at_last_report = contact.confidence;
@@ -322,8 +367,47 @@ impl SimulationState {
                         engagement.hit = false;
                         engagement.status = "aborted".into();
                     } else {
-                        contact.destroyed = true;
-                        engagement.status = "hit".into();
+                        let survival_percent = contact
+                            .defenses
+                            .iter()
+                            .filter(|defense| defense.remaining_charges > 0)
+                            .fold(100_u64, |survival, defense| {
+                                survival * u64::from(100 - defense.intercept_chance_percent) / 100
+                            });
+                        let intercept_chance = 100 - survival_percent;
+                        let defense_roll = engagement
+                            .impact_at_seconds
+                            .wrapping_add(engagement.id.wrapping_mul(19))
+                            .wrapping_add(
+                                contact
+                                    .id
+                                    .bytes()
+                                    .fold(0_u64, |sum, byte| sum + u64::from(byte)),
+                            )
+                            % 100;
+                        if defense_roll < intercept_chance {
+                            if let Some(defense) = contact
+                                .defenses
+                                .iter_mut()
+                                .find(|defense| defense.remaining_charges > 0)
+                            {
+                                defense.remaining_charges -= 1;
+                                engagement.intercepted_by = Some(defense.name.clone());
+                            }
+                            engagement.hit = false;
+                            engagement.status = "intercepted".into();
+                        } else {
+                            engagement.damage_applied_percent =
+                                contact.health.min(engagement.damage_percent);
+                            contact.health =
+                                contact.health.saturating_sub(engagement.damage_percent);
+                            contact.destroyed = contact.health == 0;
+                            engagement.status = if contact.destroyed {
+                                "hit".into()
+                            } else {
+                                "damaged".into()
+                            };
+                        }
                     }
                 } else {
                     engagement.hit = false;
@@ -336,11 +420,18 @@ impl SimulationState {
                 engagement.weapon_name.clone(),
                 engagement.contact_label.clone(),
                 engagement.status.clone(),
+                engagement.intercepted_by.clone(),
+                engagement.damage_applied_percent,
             ));
         }
-        for (weapon_name, contact_label, status) in impact_events {
+        for (weapon_name, contact_label, status, intercepted_by, damage) in impact_events {
             let message = match status.as_str() {
                 "hit" => format!("{weapon_name} hit {contact_label}"),
+                "damaged" => format!("{weapon_name} damaged {contact_label} ({damage}% damage)"),
+                "intercepted" => format!(
+                    "{weapon_name} intercepted by {} protecting {contact_label}",
+                    intercepted_by.unwrap_or_else(|| "defenses".into())
+                ),
                 "miss" => format!("{weapon_name} missed {contact_label}"),
                 _ => format!("{weapon_name} impact aborted; {contact_label} is no longer active"),
             };
@@ -612,6 +703,9 @@ impl SimulationState {
             contact_id: contact_id.to_string(),
             contact_label: contact_label.clone(),
             hit_chance_percent,
+            damage_percent: weapon.damage_percent,
+            damage_applied_percent: 0,
+            intercepted_by: None,
             status: "in_flight".into(),
             hit,
         });
@@ -846,6 +940,7 @@ mod tests {
         assert!(state.fire_weapon("ddg-01", "harpoon", "c-101").is_err());
 
         state.classify_contact("c-101", "hostile").unwrap();
+        state.contacts[0].defenses.clear();
         let ammunition_before = state.units[0].weapons[1].ammunition;
         state.fire_weapon("ddg-01", "harpoon", "c-101").unwrap();
 
@@ -870,6 +965,58 @@ mod tests {
     }
 
     #[test]
+    fn defenses_intercept_incoming_weapons_and_consume_a_charge() {
+        let mut state = SimulationState::default();
+        state.classify_contact("c-101", "hostile").unwrap();
+        state.contacts[0].defenses[0].intercept_chance_percent = 100;
+        let charges_before = state.contacts[0].defenses[0].remaining_charges;
+
+        state.fire_weapon("ddg-01", "harpoon", "c-101").unwrap();
+        let seconds_to_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_impact);
+
+        assert_eq!(state.engagements[0].status, "intercepted");
+        assert_eq!(
+            state.contacts[0].defenses[0].remaining_charges,
+            charges_before - 1
+        );
+        assert_eq!(state.contacts[0].health, 100);
+        assert!(!state.contacts[0].destroyed);
+    }
+
+    #[test]
+    fn repeated_weapon_hits_apply_graduated_damage_before_destruction() {
+        let mut state = SimulationState::default();
+        state.classify_contact("c-101", "hostile").unwrap();
+        state.contacts[0].defenses.clear();
+        state.units[0].weapons[1].damage_percent = 40;
+        state.units[0].weapons[1].hit_chance_percent = 100;
+        let unit_id = "ddg-01";
+        let weapon_id = "harpoon";
+        let contact_id = "c-101";
+        let id_salt = unit_id
+            .bytes()
+            .chain(weapon_id.bytes())
+            .chain(contact_id.bytes())
+            .fold(0_u64, |sum, byte| sum + u64::from(byte));
+
+        for (expected_health, expected_status) in [(60, "damaged"), (20, "damaged"), (0, "hit")] {
+            let engagement_id = state.engagements.last().map_or(1, |item| item.id + 1);
+            let roll =
+                (state.elapsed_seconds + state.tick * 17 + engagement_id * 31 + id_salt) % 100;
+            state.elapsed_seconds += (100 - roll) % 100;
+            state.fire_weapon(unit_id, weapon_id, contact_id).unwrap();
+            assert!(state.engagements.last().unwrap().hit);
+            let seconds_to_impact =
+                state.engagements.last().unwrap().impact_at_seconds - state.elapsed_seconds;
+            state.advance(seconds_to_impact);
+            assert_eq!(state.contacts[0].health, expected_health);
+            assert_eq!(state.engagements.last().unwrap().status, expected_status);
+        }
+        assert!(state.contacts[0].destroyed);
+    }
+
+    #[test]
     fn m7_fields_default_when_loading_a_pre_weapon_save() {
         let mut old_save = serde_json::to_value(SimulationState::default()).unwrap();
         let object = old_save.as_object_mut().unwrap();
@@ -879,12 +1026,47 @@ mod tests {
         }
         for contact in object.get_mut("contacts").unwrap().as_array_mut().unwrap() {
             contact.as_object_mut().unwrap().remove("destroyed");
+            contact.as_object_mut().unwrap().remove("health");
+            contact.as_object_mut().unwrap().remove("defenses");
         }
 
         let restored: SimulationState = serde_json::from_value(old_save).unwrap();
         assert!(restored.engagements.is_empty());
         assert!(restored.units.iter().all(|unit| unit.weapons.is_empty()));
         assert!(restored.contacts.iter().all(|contact| !contact.destroyed));
+        assert!(restored
+            .contacts
+            .iter()
+            .all(|contact| contact.health == 100));
+        assert!(restored
+            .contacts
+            .iter()
+            .all(|contact| contact.defenses.is_empty()));
+    }
+
+    #[test]
+    fn new_damage_fields_default_for_saves_with_m7_weapon_records() {
+        let mut state = SimulationState::default();
+        state.classify_contact("c-101", "hostile").unwrap();
+        state.fire_weapon("ddg-01", "harpoon", "c-101").unwrap();
+        let mut old_save = serde_json::to_value(state).unwrap();
+        let object = old_save.as_object_mut().unwrap();
+        object["units"][0]["weapons"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("damagePercent");
+        for field in ["damagePercent", "damageAppliedPercent", "interceptedBy"] {
+            object["engagements"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+        }
+
+        let restored: SimulationState = serde_json::from_value(old_save).unwrap();
+        assert_eq!(restored.units[0].weapons[1].damage_percent, 100);
+        assert_eq!(restored.engagements[0].damage_percent, 100);
+        assert_eq!(restored.engagements[0].damage_applied_percent, 0);
+        assert!(restored.engagements[0].intercepted_by.is_none());
     }
 
     #[test]
