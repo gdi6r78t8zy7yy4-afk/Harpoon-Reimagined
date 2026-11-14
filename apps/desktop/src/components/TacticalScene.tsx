@@ -9,6 +9,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Engine } from '@babylonjs/core/Engines/engine'
 import { Scene } from '@babylonjs/core/scene'
+import earcut from 'earcut'
 import type { Coastline, Contact, Engagement, Unit } from '../types'
 
 type Props = { units: Unit[]; contacts: Contact[]; engagements: Engagement[]; coastlines: Coastline[]; elapsedSeconds: number; selectedId: string; onSelect: (id: string) => void }
@@ -97,7 +98,7 @@ export function TacticalScene({ units, contacts, engagements, coastlines, elapse
     }
 
     for (const coastline of coastlines) {
-      const land = MeshBuilder.CreatePolygon(`coastline-${coastline.id}`, { shape: coastline.points.map((point) => new Vector3(point.x, 0, point.z)), sideOrientation: Mesh.DOUBLESIDE }, scene)
+      const land = MeshBuilder.CreatePolygon(`coastline-${coastline.id}`, { shape: coastline.points.map((point) => new Vector3(point.x, 0, point.z)), sideOrientation: Mesh.DOUBLESIDE }, scene, earcut)
       land.position.y = 0.03
       const landMaterial = new StandardMaterial(`coastline-material-${coastline.id}`, scene)
       landMaterial.diffuseColor = new Color3(0.16, 0.2, 0.15)
