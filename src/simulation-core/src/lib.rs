@@ -1734,6 +1734,45 @@ mod tests {
     }
 
     #[test]
+    fn shipped_satellite_reports_on_passage_and_blinding_raises_escalation() {
+        // End-to-end check against the starter scenario's authored content:
+        // ORBITAL TRACK must report during its first pass window, and the
+        // ship's SM-3 ERAM loadout must be able to blind it.
+        let mut state = SimulationState::default();
+
+        state.advance(1_890); // 15_510 -> 17_400, the first authored pass window
+        assert!(state.events.iter().any(|event| {
+            event.source == "SPACE DOMAIN"
+                && event.message.starts_with("ORBITAL TRACK orbital pass complete")
+        }));
+
+        state.classify_contact("c-104", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "sm-3-asat", "c-104");
+        state.fire_weapon("ddg-01", "sm-3-asat", "c-104").unwrap();
+        assert_eq!(state.units[0].weapons[3].ammunition, 3);
+
+        let seconds_to_impact = state.engagements[0].impact_at_seconds - state.elapsed_seconds;
+        state.advance(seconds_to_impact);
+
+        assert_eq!(state.engagements[0].status, "disabled");
+        assert_eq!(state.contacts[3].health, 100);
+        assert_eq!(
+            state.contacts[3].sensors_disabled_until_seconds,
+            state.engagements[0].impact_at_seconds + 1_800
+        );
+        assert_eq!(
+            state.contacts[3].hardening_until_seconds,
+            state.contacts[3].sensors_disabled_until_seconds + 900
+        );
+
+        // The authored hardening window rejects a follow-up shot.
+        assert!(state
+            .fire_weapon("ddg-01", "sm-3-asat", "c-104")
+            .unwrap_err()
+            .contains("hardened"));
+    }
+
+    #[test]
     fn m11_space_fields_default_when_loading_older_saves() {
         let state = SimulationState::default();
         let mut old_save = serde_json::to_value(state).unwrap();
