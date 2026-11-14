@@ -188,6 +188,8 @@ export async function loadCampaign(): Promise<CampaignSession> {
   normalizeBrowserContacts(browserState)
   browserCampaign = save.campaign
   normalizeScenarioResults(browserCampaign)
+  // Older saves may predate escalation (or the space domain); recompute so the level self-heals.
+  recomputeEscalation(browserCampaign)
   browserSettings = save.settings ?? { timeScale: 5, layersVisible: true }
   browserSavedAt = save.savedAt
   return { simulation: structuredClone(browserState), status: browserStatus() }
