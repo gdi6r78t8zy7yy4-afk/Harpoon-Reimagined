@@ -79,6 +79,14 @@ pub struct Contact {
     pub sensors_disabled_until_seconds: u64,
     #[serde(default)]
     pub sensor_disable_source: Option<String>,
+    #[serde(default)]
+    pub cyber_sensors_disrupted_until_seconds: u64,
+    #[serde(default)]
+    pub sensor_disruption_source: Option<String>,
+    #[serde(default)]
+    pub cyber_command_disrupted_until_seconds: u64,
+    #[serde(default)]
+    pub command_disruption_source: Option<String>,
 }
 
 fn default_hardening_seconds() -> u16 {
@@ -140,8 +148,14 @@ pub struct Engagement {
     pub damage_applied_percent: u8,
     #[serde(default)]
     pub intercepted_by: Option<String>,
+    #[serde(default = "default_legacy_effect_target")]
+    pub effect_target: String,
     pub status: String,
     pub hit: bool,
+}
+
+fn default_legacy_effect_target() -> String {
+    "defenses".into()
 }
 
 const MAX_TRACK_REPORT_HISTORY: usize = 20;
@@ -282,6 +296,10 @@ impl SimulationState {
                 hardening_until_seconds: 0,
                 sensors_disabled_until_seconds: 0,
                 sensor_disable_source: None,
+                cyber_sensors_disrupted_until_seconds: 0,
+                sensor_disruption_source: None,
+                cyber_command_disrupted_until_seconds: 0,
+                command_disruption_source: None,
             })
             .collect();
         let objectives = scenario
@@ -337,6 +355,14 @@ impl SimulationState {
                 contact.defenses_disrupted_until_seconds = 0;
                 contact.defense_disruption_source = None;
             }
+            if contact.cyber_sensors_disrupted_until_seconds <= self.elapsed_seconds {
+                contact.cyber_sensors_disrupted_until_seconds = 0;
+                contact.sensor_disruption_source = None;
+            }
+            if contact.cyber_command_disrupted_until_seconds <= self.elapsed_seconds {
+                contact.cyber_command_disrupted_until_seconds = 0;
+                contact.command_disruption_source = None;
+            }
             if contact.last_reported_seconds == 0 {
                 contact.last_reported_seconds = self.elapsed_seconds;
                 contact.confidence_at_last_report = contact.confidence;
@@ -369,7 +395,9 @@ impl SimulationState {
             }
         }
         for contact in &mut self.contacts {
-            if contact.ground_track_speed_knots > 0 {
+            if contact.ground_track_speed_knots > 0
+                && contact.cyber_command_disrupted_until_seconds <= self.elapsed_seconds
+            {
                 let radians = contact.ground_track_heading_deg.to_radians();
                 let distance =
                     f32::from(contact.ground_track_speed_knots) * seconds as f32 / 3600.0;
@@ -380,8 +408,38 @@ impl SimulationState {
             }
         }
         let mut stale_tracks = Vec::new();
+        let mut lost_classifications = Vec::new();
         for contact in &mut self.contacts {
             if contact.identified {
+                if contact.cyber_sensors_disrupted_until_seconds > self.elapsed_seconds {
+                    // Blinded targets collapse emissions discipline: identified
+                    // tracks age at triple the normal unrefreshed rate.
+                    let degradation_steps = self
+                        .elapsed_seconds
+                        .saturating_sub(contact.last_reported_seconds)
+                        / 600;
+                    contact.confidence = contact.confidence_at_last_report.saturating_sub(
+                        (degradation_steps.saturating_mul(15)).min(u64::from(u8::MAX)) as u8,
+                    );
+                    contact.range_uncertainty_nm = (contact.range_uncertainty_at_last_report
+                        + degradation_steps as f32 * 0.6)
+                        .min(100.0);
+                    contact.bearing_uncertainty_deg = (contact.bearing_uncertainty_at_last_report
+                        + degradation_steps as f32 * 3.0)
+                        .min(180.0);
+                    if contact.confidence < 25 {
+                        let previous_label = contact.label.clone();
+                        contact.identified = false;
+                        contact.classification = "Unknown".into();
+                        contact.label = format!("UNKNOWN {}", contact.domain.to_uppercase());
+                        // Re-anchor so ordinary aging continues from the degraded state.
+                        contact.last_reported_seconds = self.elapsed_seconds;
+                        contact.confidence_at_last_report = contact.confidence;
+                        contact.range_uncertainty_at_last_report = contact.range_uncertainty_nm;
+                        contact.bearing_uncertainty_at_last_report = contact.bearing_uncertainty_deg;
+                        lost_classifications.push(previous_label);
+                    }
+                }
                 continue;
             }
             // Saves created before track aging was added have no report timestamps.
@@ -409,6 +467,15 @@ impl SimulationState {
         for label in stale_tracks {
             self.push_event(format!("Track is stale: {label}"), "SENSORS".into());
         }
+        if !lost_classifications.is_empty() {
+            for label in lost_classifications {
+                self.push_event(
+                    format!("{label} track degraded to unidentified; classification lost"),
+                    "CYBER OPERATIONS".into(),
+                );
+            }
+            self.update_objectives();
+        }
         self.process_orbital_passes(previous_elapsed_seconds);
         let mut impact_events = Vec::new();
         for engagement in &mut self.engagements {
@@ -427,13 +494,50 @@ impl SimulationState {
                         engagement.hit = false;
                         engagement.status = "aborted".into();
                     } else if engagement.weapon_kind == "cyber" {
-                        let disruption_start = contact
-                            .defenses_disrupted_until_seconds
-                            .max(engagement.impact_at_seconds);
-                        contact.defenses_disrupted_until_seconds = disruption_start
-                            .saturating_add(u64::from(engagement.disruption_duration_seconds.max(60)));
-                        contact.defense_disruption_source = Some(engagement.weapon_name.clone());
-                        engagement.status = "disrupted".into();
+                        let duration = u64::from(engagement.disruption_duration_seconds.max(60));
+                        match engagement.effect_target.as_str() {
+                            "sensors" => {
+                                if contact.cyber_sensors_disrupted_until_seconds
+                                    <= engagement.impact_at_seconds
+                                {
+                                    // Fresh window: anchor track degradation at impact values.
+                                    contact.last_reported_seconds = engagement.impact_at_seconds;
+                                    contact.confidence_at_last_report = contact.confidence;
+                                    contact.range_uncertainty_at_last_report =
+                                        contact.range_uncertainty_nm;
+                                    contact.bearing_uncertainty_at_last_report =
+                                        contact.bearing_uncertainty_deg;
+                                }
+                                let disruption_start = contact
+                                    .cyber_sensors_disrupted_until_seconds
+                                    .max(engagement.impact_at_seconds);
+                                contact.cyber_sensors_disrupted_until_seconds =
+                                    disruption_start.saturating_add(duration);
+                                contact.sensor_disruption_source =
+                                    Some(engagement.weapon_name.clone());
+                                engagement.status = "sensors_disrupted".into();
+                            }
+                            "command" => {
+                                let disruption_start = contact
+                                    .cyber_command_disrupted_until_seconds
+                                    .max(engagement.impact_at_seconds);
+                                contact.cyber_command_disrupted_until_seconds =
+                                    disruption_start.saturating_add(duration);
+                                contact.command_disruption_source =
+                                    Some(engagement.weapon_name.clone());
+                                engagement.status = "command_disrupted".into();
+                            }
+                            _ => {
+                                let disruption_start = contact
+                                    .defenses_disrupted_until_seconds
+                                    .max(engagement.impact_at_seconds);
+                                contact.defenses_disrupted_until_seconds =
+                                    disruption_start.saturating_add(duration);
+                                contact.defense_disruption_source =
+                                    Some(engagement.weapon_name.clone());
+                                engagement.status = "disrupted".into();
+                            }
+                        }
                     } else {
                         let survival_percent = contact
                             .defenses
@@ -525,6 +629,14 @@ impl SimulationState {
                 "damaged" => format!("{weapon_name} damaged {contact_label} ({damage}% damage)"),
                 "disrupted" => format!(
                     "{weapon_name} disrupted {contact_label}'s defensive systems for {} min",
+                    u64::from(disruption_duration).div_ceil(60)
+                ),
+                "sensors_disrupted" => format!(
+                    "{weapon_name} blinded {contact_label}'s sensor systems for {} min",
+                    u64::from(disruption_duration).div_ceil(60)
+                ),
+                "command_disrupted" => format!(
+                    "{weapon_name} severed command control of {contact_label} for {} min",
                     u64::from(disruption_duration).div_ceil(60)
                 ),
                 "disabled" => format!(
@@ -673,6 +785,38 @@ impl SimulationState {
             self.push_event(
                 format!("Orbital sensing restored on {label}"),
                 source.unwrap_or_else(|| "SPACE DOMAIN".into()),
+            );
+        }
+        let mut restored_sensor_systems = Vec::new();
+        for contact in &mut self.contacts {
+            if contact.cyber_sensors_disrupted_until_seconds == 0
+                || contact.cyber_sensors_disrupted_until_seconds > self.elapsed_seconds
+            {
+                continue;
+            }
+            contact.cyber_sensors_disrupted_until_seconds = 0;
+            restored_sensor_systems.push((contact.label.clone(), contact.sensor_disruption_source.take()));
+        }
+        for (label, source) in restored_sensor_systems {
+            self.push_event(
+                format!("Sensor systems restored on {label}"),
+                source.unwrap_or_else(|| "CYBER OPERATIONS".into()),
+            );
+        }
+        let mut restored_command = Vec::new();
+        for contact in &mut self.contacts {
+            if contact.cyber_command_disrupted_until_seconds == 0
+                || contact.cyber_command_disrupted_until_seconds > self.elapsed_seconds
+            {
+                continue;
+            }
+            contact.cyber_command_disrupted_until_seconds = 0;
+            restored_command.push((contact.label.clone(), contact.command_disruption_source.take()));
+        }
+        for (label, source) in restored_command {
+            self.push_event(
+                format!("Command control restored on {label}"),
+                source.unwrap_or_else(|| "CYBER OPERATIONS".into()),
             );
         }
     }
@@ -950,6 +1094,10 @@ impl SimulationState {
             disruption_duration_seconds: weapon.effect_duration_seconds,
             damage_applied_percent: 0,
             intercepted_by: None,
+            effect_target: weapon
+                .effect_target
+                .clone()
+                .unwrap_or_else(|| "defenses".into()),
             status: "in_flight".into(),
             hit,
         });
@@ -1386,6 +1534,186 @@ mod tests {
         assert!(restored.contacts[0].defense_disruption_source.is_none());
         assert_eq!(restored.engagements[0].weapon_kind, "missile");
         assert_eq!(restored.engagements[0].disruption_duration_seconds, 0);
+    }
+
+    fn state_with_cyber_effects() -> SimulationState {
+        let mut value: serde_json::Value =
+            serde_json::from_str(super::STARTER_SCENARIO).unwrap();
+        // Deterministic effect weapons and a moving target for M12 rules tests.
+        value["units"][0]["weapons"]
+            .as_array_mut()
+            .unwrap()
+            .extend([
+                serde_json::json!({
+                    "id": "sensor-spoof",
+                    "name": "Sensor Spoof Suite",
+                    "kind": "cyber",
+                    "effectTarget": "sensors",
+                    "rangeNm": 400.0,
+                    "domains": ["surface", "air", "subsurface"],
+                    "ammunition": 3,
+                    "hitChancePercent": 80,
+                    "speedKnots": 4000,
+                    "damagePercent": 0,
+                    "effectDurationSeconds": 7200
+                }),
+                serde_json::json!({
+                    "id": "command-virus",
+                    "name": "Command Network Virus",
+                    "kind": "cyber",
+                    "effectTarget": "command",
+                    "rangeNm": 400.0,
+                    "domains": ["surface", "air", "subsurface"],
+                    "ammunition": 3,
+                    "hitChancePercent": 80,
+                    "speedKnots": 4000,
+                    "damagePercent": 0,
+                    "effectDurationSeconds": 1800
+                }),
+            ]);
+        value["contacts"][1]["groundTrack"] =
+            serde_json::json!({ "heading": 90.0, "speedKnots": 12 });
+        SimulationState::from_scenario_json(&value.to_string()).unwrap()
+    }
+
+    #[test]
+    fn sensor_attack_degrades_the_identified_track_until_classification_is_lost() {
+        let mut state = state_with_cyber_effects();
+        state.classify_contact("c-101", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "sensor-spoof", "c-101");
+        state.fire_weapon("ddg-01", "sensor-spoof", "c-101").unwrap();
+        let impact = state.engagements[0].impact_at_seconds;
+        state.advance(impact - state.elapsed_seconds);
+
+        assert_eq!(state.engagements[0].status, "sensors_disrupted");
+        assert_eq!(
+            state.contacts[0].cyber_sensors_disrupted_until_seconds,
+            impact + 7200
+        );
+        assert_eq!(
+            state.contacts[0].sensor_disruption_source.as_deref(),
+            Some("Sensor Spoof Suite")
+        );
+        assert!(state.events.iter().any(|event| event.source == "CYBER OPERATIONS"
+            && event.message.contains("blinded")));
+
+        // Identified tracks age at triple the normal unrefreshed rate while blinded.
+        state.advance(601);
+        assert_eq!(state.contacts[0].confidence, 85);
+
+        // Losing confidence below the threshold reverts the track to unidentified.
+        state.advance(3000);
+        let contact = &state.contacts[0];
+        assert!(!contact.identified);
+        assert_eq!(contact.classification, "Unknown");
+        assert_eq!(contact.label, "UNKNOWN SURFACE");
+        assert!(state.events.iter().any(|event| event.source == "CYBER OPERATIONS"
+            && event.message.contains("degraded to unidentified")));
+        // Objective progress follows the lost classification.
+        assert_eq!(state.objectives[0].progress, 0);
+    }
+
+    #[test]
+    fn command_attack_freezes_ground_track_until_the_window_closes() {
+        let mut state = state_with_cyber_effects();
+        // c-102 is authored underway at 12 kt; confirm it moves before the strike.
+        state.advance(3600);
+        assert!((state.contacts[1].x - 15.0).abs() < 0.01, "x={}", state.contacts[1].x);
+
+        state.classify_contact("c-102", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "command-virus", "c-102");
+        state.fire_weapon("ddg-01", "command-virus", "c-102").unwrap();
+        let impact = state.engagements[0].impact_at_seconds;
+        state.advance(impact - state.elapsed_seconds);
+
+        assert_eq!(state.engagements[0].status, "command_disrupted");
+        let contact = &state.contacts[1];
+        assert_eq!(contact.cyber_command_disrupted_until_seconds, impact + 1800);
+        assert_eq!(
+            contact.command_disruption_source.as_deref(),
+            Some("Command Network Virus")
+        );
+
+        let frozen_x = state.contacts[1].x;
+        state.advance(600);
+        assert!((state.contacts[1].x - frozen_x).abs() < 0.001, "must hold station");
+
+        let until = state.contacts[1].cyber_command_disrupted_until_seconds;
+        state.advance(until - state.elapsed_seconds + 1);
+        assert_eq!(state.contacts[1].cyber_command_disrupted_until_seconds, 0);
+        assert!(state.events.iter().any(|event| event.source == "Command Network Virus"
+            && event.message.contains("Command control restored")));
+
+        // Motion resumes from the held position at the authored speed. The
+        // recovery step itself already advances past the window end, so it
+        // contributes motion too: 1201 s + 3600 s at 12 kt ≈ 16 map units.
+        state.advance(3600);
+        let resumed = state.contacts[1].x - frozen_x;
+        assert!((resumed - 16.0).abs() < 0.1, "resumed drift {resumed}");
+    }
+
+    #[test]
+    fn cyber_windows_stack_per_system_and_do_not_interfere() {
+        let mut state = state_with_cyber_effects();
+        state.classify_contact("c-101", "hostile").unwrap();
+
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "cyber-disruptor", "c-101");
+        state.fire_weapon("ddg-01", "cyber-disruptor", "c-101").unwrap();
+        let defenses_impact = state.engagements[0].impact_at_seconds;
+
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "sensor-spoof", "c-101");
+        state.fire_weapon("ddg-01", "sensor-spoof", "c-101").unwrap();
+        let sensors_impact = state.engagements[1].impact_at_seconds;
+
+        state.advance(sensors_impact - state.elapsed_seconds);
+        assert_eq!(state.engagements[0].status, "disrupted");
+        assert_eq!(state.engagements[1].status, "sensors_disrupted");
+        let contact = &state.contacts[0];
+        assert_eq!(contact.defenses_disrupted_until_seconds, defenses_impact + 900);
+        let first_sensors_end = contact.cyber_sensors_disrupted_until_seconds;
+        assert_eq!(first_sensors_end, sensors_impact + 7200);
+
+        // A second sensor attack extends from the current window end.
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "sensor-spoof", "c-101");
+        state.fire_weapon("ddg-01", "sensor-spoof", "c-101").unwrap();
+        let second_impact = state.engagements[2].impact_at_seconds;
+        assert!(second_impact < first_sensors_end);
+        state.advance(second_impact - state.elapsed_seconds);
+        assert_eq!(
+            state.contacts[0].cyber_sensors_disrupted_until_seconds,
+            first_sensors_end + 7200
+        );
+    }
+
+    #[test]
+    fn m12_cyber_effect_fields_default_when_loading_older_saves() {
+        let mut state = state_with_cyber_effects();
+        state.classify_contact("c-101", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "sensor-spoof", "c-101");
+        state.fire_weapon("ddg-01", "sensor-spoof", "c-101").unwrap();
+        let mut old_save = serde_json::to_value(state).unwrap();
+        for field in [
+            "cyberSensorsDisruptedUntilSeconds",
+            "sensorDisruptionSource",
+            "cyberCommandDisruptedUntilSeconds",
+            "commandDisruptionSource",
+        ] {
+            old_save["contacts"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+        }
+        old_save["engagements"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("effectTarget");
+
+        let restored: SimulationState = serde_json::from_value(old_save).unwrap();
+        assert_eq!(restored.contacts[0].cyber_sensors_disrupted_until_seconds, 0);
+        assert!(restored.contacts[0].sensor_disruption_source.is_none());
+        assert_eq!(restored.contacts[0].cyber_command_disrupted_until_seconds, 0);
+        assert!(restored.contacts[0].command_disruption_source.is_none());
+        assert_eq!(restored.engagements[0].effect_target, "defenses");
     }
 
     #[test]
