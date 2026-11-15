@@ -42,6 +42,8 @@ pub struct WeaponDefinition {
     pub damage_percent: u8,
     #[serde(default)]
     pub effect_duration_seconds: u16,
+    #[serde(default)]
+    pub effect_target: Option<String>,
 }
 
 fn default_weapon_damage_percent() -> u8 {
@@ -267,6 +269,18 @@ impl ScenarioDefinition {
                 {
                     return invalid("Weapon type, range, ammunition, accuracy, speed, damage, effect duration, or domain is outside supported limits");
                 }
+                let effect_target_valid = match weapon.kind.as_str() {
+                    "cyber" => matches!(
+                        weapon.effect_target.as_deref(),
+                        None | Some("defenses") | Some("sensors") | Some("command")
+                    ),
+                    _ => weapon.effect_target.is_none(),
+                };
+                if !effect_target_valid {
+                    return invalid(
+                        "Effect target applies only to cyber weapons and must be defenses, sensors, or command",
+                    );
+                }
             }
         }
 
@@ -306,15 +320,19 @@ impl ScenarioDefinition {
                 }
             }
 
-            if contact.domain == "space" {
-                if let Some(ground_track) = &contact.ground_track {
-                    if !(0.0..360.0).contains(&ground_track.heading)
-                        || ground_track.speed_knots == 0
-                        || ground_track.speed_knots > 600
-                    {
-                        return invalid("Ground-track heading or drift speed is outside supported limits");
-                    }
+            if let Some(ground_track) = &contact.ground_track {
+                let speed_cap = match contact.domain.as_str() {
+                    "air" | "space" => 600,
+                    _ => 50,
+                };
+                if !(0.0..360.0).contains(&ground_track.heading)
+                    || ground_track.speed_knots == 0
+                    || ground_track.speed_knots > speed_cap
+                {
+                    return invalid("Ground-track heading or drift speed is outside supported limits");
                 }
+            }
+            if contact.domain == "space" {
                 if contact.hardening_seconds.unwrap_or(600) > 3600 {
                     return invalid("Hardening cooldown must not exceed 3600 seconds");
                 }
@@ -350,11 +368,8 @@ impl ScenarioDefinition {
                         previous_end = end;
                     }
                 }
-            } else if contact.ground_track.is_some()
-                || contact.orbital_sensor.is_some()
-                || contact.hardening_seconds.is_some()
-            {
-                return invalid("Ground-track motion, orbital sensors, and hardening apply only to space contacts");
+            } else if contact.orbital_sensor.is_some() || contact.hardening_seconds.is_some() {
+                return invalid("Orbital sensors and hardening apply only to space contacts");
             }
         }
 
@@ -634,11 +649,50 @@ mod tests {
             .contains("Orbital sensor range or domain"));
 
         value["contacts"][0]["orbitalSensor"]["domains"] = json!(["surface"]);
-        value["contacts"][1]["groundTrack"] = json!({ "heading": 90.0, "speedKnots": 240 });
-        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        let mut relaxed: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        relaxed["contacts"][0]["groundTrack"] = json!({ "heading": 90.0, "speedKnots": 24 });
+        ScenarioDefinition::parse(&relaxed.to_string())
+            .expect("surface contacts may carry ground-track motion");
+
+        relaxed["contacts"][0]["groundTrack"]["speedKnots"] = json!(60);
+        let error = ScenarioDefinition::parse(&relaxed.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Ground-track heading or drift speed"));
+
+        relaxed["contacts"][0]["groundTrack"]["speedKnots"] = json!(24);
+        relaxed["contacts"][1]["orbitalSensor"] = space_contact()["orbitalSensor"].clone();
+        let error = ScenarioDefinition::parse(&relaxed.to_string()).unwrap_err();
         assert!(error
             .to_string()
             .contains("apply only to space contacts"));
+    }
+
+    #[test]
+    fn cyber_effect_targets_are_validated_and_default_to_defenses() {
+        let parsed = ScenarioDefinition::parse(SCENARIO).expect("starter scenario is valid");
+        assert_eq!(parsed.units[0].weapons[2].effect_target, None);
+
+        let mut value: serde_json::Value = serde_json::from_str(SCENARIO).unwrap();
+        value["units"][0]["weapons"][2]["effectTarget"] = json!("sensors");
+        let parsed = ScenarioDefinition::parse(&value.to_string()).expect("sensor attack is valid");
+        assert_eq!(
+            parsed.units[0].weapons[2].effect_target.as_deref(),
+            Some("sensors")
+        );
+
+        value["units"][0]["weapons"][2]["effectTarget"] = json!("propulsion");
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Effect target applies only to cyber weapons"));
+
+        value["units"][0]["weapons"][2]["effectTarget"] = json!("sensors");
+        value["units"][0]["weapons"][0]["effectTarget"] = json!("command");
+        let error = ScenarioDefinition::parse(&value.to_string()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Effect target applies only to cyber weapons"));
     }
 
     #[test]
