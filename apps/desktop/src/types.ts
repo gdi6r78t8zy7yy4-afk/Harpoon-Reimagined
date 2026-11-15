@@ -32,6 +32,7 @@ export type Weapon = {
   speedKnots: number
   damagePercent: number
   effectDurationSeconds: number
+  effectTarget?: 'defenses' | 'sensors' | 'command'
 }
 
 export type DefenseSystem = {
@@ -76,6 +77,10 @@ export type Contact = {
   hardeningUntilSeconds: number
   sensorsDisabledUntilSeconds: number
   sensorDisableSource: string | null
+  cyberSensorsDisruptedUntilSeconds: number
+  sensorDisruptionSource: string | null
+  cyberCommandDisruptedUntilSeconds: number
+  commandDisruptionSource: string | null
   lastReportedSeconds: number
   confidenceAtLastReport: number
   rangeUncertaintyNm: number
@@ -144,7 +149,8 @@ export type Engagement = {
   disruptionDurationSeconds: number
   damageAppliedPercent: number
   interceptedBy: string | null
-  status: 'in_flight' | 'hit' | 'damaged' | 'disrupted' | 'disabled' | 'miss' | 'intercepted' | 'aborted'
+  effectTarget: 'defenses' | 'sensors' | 'command'
+  status: 'in_flight' | 'hit' | 'damaged' | 'disrupted' | 'sensors_disrupted' | 'command_disrupted' | 'disabled' | 'miss' | 'intercepted' | 'aborted'
   hit: boolean
 }
 

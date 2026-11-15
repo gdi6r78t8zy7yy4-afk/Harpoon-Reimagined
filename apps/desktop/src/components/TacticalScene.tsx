@@ -204,6 +204,8 @@ export function TacticalScene({ units, contacts, engagements, coastlines, elapse
         hit: new Color3(0.98, 0.31, 0.25),
         damaged: new Color3(0.98, 0.68, 0.28),
         disrupted: new Color3(0.76, 0.55, 0.88),
+        sensors_disrupted: new Color3(0.86, 0.45, 0.72),
+        command_disrupted: new Color3(0.55, 0.48, 0.9),
         disabled: new Color3(0.45, 0.72, 0.98),
         intercepted: new Color3(0.35, 0.78, 0.94),
         miss: new Color3(0.58, 0.69, 0.69),

@@ -12,7 +12,7 @@ export const campaignConsequences: Consequence[] = (campaignDefinition as { cons
 
 type ScenarioUnit = Omit<Unit, 'x' | 'z'> & { position: { x: number; z: number } }
 type ScenarioDefense = { id: string; name: string; charges: number; interceptChancePercent: number }
-type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed' | 'health' | 'defenses' | 'defensesDisruptedUntilSeconds' | 'defenseDisruptionSource' | 'groundTrackHeadingDeg' | 'groundTrackSpeedKnots' | 'orbitalSensor' | 'hardeningSeconds' | 'hardeningUntilSeconds' | 'sensorsDisabledUntilSeconds' | 'sensorDisableSource'> & { position: { x: number; z: number }; defenses: ScenarioDefense[]; groundTrack?: { heading: number; speedKnots: number }; orbitalSensor?: OrbitalSensor; hardeningSeconds?: number }
+type ScenarioContact = Omit<Contact, 'x' | 'z' | 'lastReportedSeconds' | 'confidenceAtLastReport' | 'rangeUncertaintyNm' | 'bearingUncertaintyDeg' | 'rangeUncertaintyAtLastReport' | 'bearingUncertaintyAtLastReport' | 'reportCount' | 'reportHistory' | 'correlatedContactIds' | 'destroyed' | 'health' | 'defenses' | 'defensesDisruptedUntilSeconds' | 'defenseDisruptionSource' | 'groundTrackHeadingDeg' | 'groundTrackSpeedKnots' | 'orbitalSensor' | 'hardeningSeconds' | 'hardeningUntilSeconds' | 'sensorsDisabledUntilSeconds' | 'sensorDisableSource' | 'cyberSensorsDisruptedUntilSeconds' | 'sensorDisruptionSource' | 'cyberCommandDisruptedUntilSeconds' | 'commandDisruptionSource'> & { position: { x: number; z: number }; defenses: ScenarioDefense[]; groundTrack?: { heading: number; speedKnots: number }; orbitalSensor?: OrbitalSensor; hardeningSeconds?: number }
 
 const initialRangeUncertainty = (confidence: number) => 1 + (100 - confidence) * 0.12
 const initialBearingUncertainty = (confidence: number) => 2 + (100 - confidence) * 0.5
@@ -40,7 +40,7 @@ function createBrowserState(): SimulationState {
     running: false,
     missionComplete: false,
     units: (scenario.units as ScenarioUnit[]).map(({ position, ...unit }) => ({ ...unit, x: position.x, z: position.z })),
-    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, groundTrack, hardeningSeconds, orbitalSensor, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false, health: 100, defensesDisruptedUntilSeconds: 0, defenseDisruptionSource: null, groundTrackHeadingDeg: groundTrack?.heading ?? 0, groundTrackSpeedKnots: groundTrack?.speedKnots ?? 0, orbitalSensor: orbitalSensor ?? null, hardeningSeconds: hardeningSeconds ?? 600, hardeningUntilSeconds: 0, sensorsDisabledUntilSeconds: 0, sensorDisableSource: null, defenses: (contact.defenses ?? []).map(({ charges, ...defense }) => ({ ...defense, remainingCharges: charges })) })),
+    contacts: (scenario.contacts as ScenarioContact[]).map(({ position, groundTrack, hardeningSeconds, orbitalSensor, ...contact }) => ({ ...contact, x: position.x, z: position.z, lastReportedSeconds: scenario.startTimeSeconds, confidenceAtLastReport: contact.confidence, rangeUncertaintyNm: initialRangeUncertainty(contact.confidence), bearingUncertaintyDeg: initialBearingUncertainty(contact.confidence), rangeUncertaintyAtLastReport: initialRangeUncertainty(contact.confidence), bearingUncertaintyAtLastReport: initialBearingUncertainty(contact.confidence), reportCount: 1, reportHistory: [], correlatedContactIds: [], destroyed: false, health: 100, defensesDisruptedUntilSeconds: 0, defenseDisruptionSource: null, groundTrackHeadingDeg: groundTrack?.heading ?? 0, groundTrackSpeedKnots: groundTrack?.speedKnots ?? 0, orbitalSensor: orbitalSensor ?? null, hardeningSeconds: hardeningSeconds ?? 600, hardeningUntilSeconds: 0, sensorsDisabledUntilSeconds: 0, sensorDisableSource: null, cyberSensorsDisruptedUntilSeconds: 0, sensorDisruptionSource: null, cyberCommandDisruptedUntilSeconds: 0, commandDisruptionSource: null, defenses: (contact.defenses ?? []).map(({ charges, ...defense }) => ({ ...defense, remainingCharges: charges })) })),
     engagements: [],
     objectives: scenario.objectives.map((objective) => ({ ...objective, progress: 0, completed: false })),
     events: [
@@ -108,6 +108,10 @@ function normalizeBrowserContacts(state: SimulationState) {
     if (!Array.isArray(contact.defenses)) contact.defenses = []
     if (!Number.isFinite(contact.defensesDisruptedUntilSeconds)) contact.defensesDisruptedUntilSeconds = 0
     if (typeof contact.defenseDisruptionSource !== 'string') contact.defenseDisruptionSource = null
+    if (contact.defensesDisruptedUntilSeconds <= state.elapsedSeconds) {
+      contact.defensesDisruptedUntilSeconds = 0
+      contact.defenseDisruptionSource = null
+    }
     if (!Number.isFinite(contact.groundTrackHeadingDeg)) contact.groundTrackHeadingDeg = 0
     if (!Number.isFinite(contact.groundTrackSpeedKnots)) contact.groundTrackSpeedKnots = 0
     if (contact.orbitalSensor === undefined) contact.orbitalSensor = null
@@ -115,6 +119,18 @@ function normalizeBrowserContacts(state: SimulationState) {
     if (!Number.isFinite(contact.hardeningUntilSeconds)) contact.hardeningUntilSeconds = 0
     if (!Number.isFinite(contact.sensorsDisabledUntilSeconds)) contact.sensorsDisabledUntilSeconds = 0
     if (typeof contact.sensorDisableSource !== 'string') contact.sensorDisableSource = null
+    if (!Number.isFinite(contact.cyberSensorsDisruptedUntilSeconds)) contact.cyberSensorsDisruptedUntilSeconds = 0
+    if (typeof contact.sensorDisruptionSource !== 'string') contact.sensorDisruptionSource = null
+    if (contact.cyberSensorsDisruptedUntilSeconds <= state.elapsedSeconds) {
+      contact.cyberSensorsDisruptedUntilSeconds = 0
+      contact.sensorDisruptionSource = null
+    }
+    if (!Number.isFinite(contact.cyberCommandDisruptedUntilSeconds)) contact.cyberCommandDisruptedUntilSeconds = 0
+    if (typeof contact.commandDisruptionSource !== 'string') contact.commandDisruptionSource = null
+    if (contact.cyberCommandDisruptedUntilSeconds <= state.elapsedSeconds) {
+      contact.cyberCommandDisruptedUntilSeconds = 0
+      contact.commandDisruptionSource = null
+    }
     if (contact.destroyed) contact.health = 0
     else if (contact.health <= 0) contact.destroyed = true
   }
@@ -125,6 +141,7 @@ function normalizeBrowserContacts(state: SimulationState) {
     if (!Number.isFinite(engagement.disruptionDurationSeconds)) engagement.disruptionDurationSeconds = 0
     if (!Number.isFinite(engagement.damageAppliedPercent)) engagement.damageAppliedPercent = 0
     if (typeof engagement.interceptedBy !== 'string') engagement.interceptedBy = null
+    if (engagement.effectTarget !== 'sensors' && engagement.effectTarget !== 'command') engagement.effectTarget = 'defenses'
   }
 }
 
@@ -217,15 +234,36 @@ export async function advance(seconds = 60) {
     unit.z -= Math.cos(radians) * distance
   }
   for (const contact of browserState.contacts) {
-    if (contact.groundTrackSpeedKnots <= 0) continue
+    if (contact.groundTrackSpeedKnots <= 0 || contact.cyberCommandDisruptedUntilSeconds > browserState.elapsedSeconds) continue
     const radians = contact.groundTrackHeadingDeg * Math.PI / 180
     const distance = contact.groundTrackSpeedKnots * safeSeconds / 3600
     // Ground tracks wrap at the map edge, modelling successive orbits re-entering the area of operations.
     contact.x = ((contact.x + Math.sin(radians) * distance + 50) % 100 + 100) % 100 - 50
     contact.z = ((contact.z - Math.cos(radians) * distance + 50) % 100 + 100) % 100 - 50
   }
+  const lostClassifications: string[] = []
   for (const contact of browserState.contacts) {
-    if (contact.identified) continue
+    if (contact.identified) {
+      if (contact.cyberSensorsDisruptedUntilSeconds > browserState.elapsedSeconds) {
+        // Blinded targets collapse emissions discipline: identified tracks age at triple the normal unrefreshed rate.
+        const degradationSteps = Math.floor((browserState.elapsedSeconds - contact.lastReportedSeconds) / 600)
+        contact.confidence = Math.max(0, contact.confidenceAtLastReport - Math.min(255, degradationSteps * 15))
+        contact.rangeUncertaintyNm = Math.min(100, contact.rangeUncertaintyAtLastReport + degradationSteps * 0.6)
+        contact.bearingUncertaintyDeg = Math.min(180, contact.bearingUncertaintyAtLastReport + degradationSteps * 3)
+        if (contact.confidence < 25) {
+          lostClassifications.push(contact.label)
+          contact.identified = false
+          contact.classification = 'Unknown'
+          contact.label = `UNKNOWN ${contact.domain.toUpperCase()}`
+          // Re-anchor so ordinary aging continues from the degraded state.
+          contact.lastReportedSeconds = browserState.elapsedSeconds
+          contact.confidenceAtLastReport = contact.confidence
+          contact.rangeUncertaintyAtLastReport = contact.rangeUncertaintyNm
+          contact.bearingUncertaintyAtLastReport = contact.bearingUncertaintyDeg
+        }
+      }
+      continue
+    }
     if (contact.lastReportedSeconds === 0) {
       contact.lastReportedSeconds = previousElapsedSeconds
       contact.confidenceAtLastReport = contact.confidence
@@ -238,15 +276,43 @@ export async function advance(seconds = 60) {
     contact.bearingUncertaintyDeg = Math.min(180, contact.bearingUncertaintyAtLastReport + ageSteps)
     if (previousAge < 1800 && trackAge >= 1800) addEvent(`Track is stale: ${contact.label}`, 'SENSORS')
   }
+  for (const label of lostClassifications) {
+    addEvent(`${label} track degraded to unidentified; classification lost`, 'CYBER OPERATIONS')
+  }
+  if (lostClassifications.length > 0) {
+    const progress = browserState.contacts.filter((item) => item.identified).length
+    for (const objective of browserState.objectives) {
+      objective.progress = Math.min(progress, objective.required)
+      objective.completed = objective.progress >= objective.required
+    }
+  }
   processBrowserOrbitalPasses(previousElapsedSeconds)
   for (const engagement of browserState.engagements) {
     if (engagement.status !== 'in_flight' || engagement.impactAtSeconds > browserState.elapsedSeconds) continue
     const target = browserState.contacts.find((item) => item.id === engagement.contactId)
     if (engagement.hit && target && !target.destroyed && engagement.weaponKind === 'cyber') {
-      const disruptionStart = Math.max(target.defensesDisruptedUntilSeconds, engagement.impactAtSeconds)
-      target.defensesDisruptedUntilSeconds = disruptionStart + Math.max(60, engagement.disruptionDurationSeconds)
-      target.defenseDisruptionSource = engagement.weaponName
-      engagement.status = 'disrupted'
+      const duration = Math.max(60, engagement.disruptionDurationSeconds)
+      if (engagement.effectTarget === 'sensors') {
+        if (target.cyberSensorsDisruptedUntilSeconds <= engagement.impactAtSeconds) {
+          // Fresh window: anchor track degradation at impact values.
+          target.lastReportedSeconds = engagement.impactAtSeconds
+          target.confidenceAtLastReport = target.confidence
+          target.rangeUncertaintyAtLastReport = target.rangeUncertaintyNm
+          target.bearingUncertaintyAtLastReport = target.bearingUncertaintyDeg
+        }
+        target.cyberSensorsDisruptedUntilSeconds = Math.max(target.cyberSensorsDisruptedUntilSeconds, engagement.impactAtSeconds) + duration
+        target.sensorDisruptionSource = engagement.weaponName
+        engagement.status = 'sensors_disrupted'
+      } else if (engagement.effectTarget === 'command') {
+        target.cyberCommandDisruptedUntilSeconds = Math.max(target.cyberCommandDisruptedUntilSeconds, engagement.impactAtSeconds) + duration
+        target.commandDisruptionSource = engagement.weaponName
+        engagement.status = 'command_disrupted'
+      } else {
+        const disruptionStart = Math.max(target.defensesDisruptedUntilSeconds, engagement.impactAtSeconds)
+        target.defensesDisruptedUntilSeconds = disruptionStart + duration
+        target.defenseDisruptionSource = engagement.weaponName
+        engagement.status = 'disrupted'
+      }
     } else if (engagement.hit && target && !target.destroyed) {
       const survival = target.defenses.filter((defense) => defense.remainingCharges > 0).reduce(
         (chance, defense) => Math.floor(chance * (100 - defense.interceptChancePercent) / 100),
@@ -288,6 +354,10 @@ export async function advance(seconds = 60) {
         ? `${engagement.weaponName} damaged ${engagement.contactLabel} (${engagement.damageAppliedPercent}% damage)`
         : engagement.status === 'disrupted'
           ? `${engagement.weaponName} disrupted ${engagement.contactLabel}'s defensive systems for ${Math.ceil(engagement.disruptionDurationSeconds / 60)} min`
+        : engagement.status === 'sensors_disrupted'
+          ? `${engagement.weaponName} blinded ${engagement.contactLabel}'s sensor systems for ${Math.ceil(engagement.disruptionDurationSeconds / 60)} min`
+        : engagement.status === 'command_disrupted'
+          ? `${engagement.weaponName} severed command control of ${engagement.contactLabel} for ${Math.ceil(engagement.disruptionDurationSeconds / 60)} min`
         : engagement.status === 'disabled'
           ? `${engagement.weaponName} disabled ${engagement.contactLabel}'s orbital sensors for ${Math.ceil(engagement.disruptionDurationSeconds / 60)} min`
         : engagement.status === 'intercepted'
@@ -436,7 +506,7 @@ export async function fireWeapon(unitId: string, weaponId: string, contactId: st
   const roll = (browserState.elapsedSeconds + browserState.tick * 17 + id * 31 + idSalt) % 100
   const hit = roll < hitChancePercent
   browserState.units[unitIndex].weapons[weaponIndex].ammunition -= 1
-  browserState.engagements.push({ id, elapsedSeconds: browserState.elapsedSeconds, impactAtSeconds: browserState.elapsedSeconds + flightSeconds, unitId, unitName: unit.name, weaponId, weaponName: weapon.name, weaponKind: weapon.kind, contactId, contactLabel: contact.label, hitChancePercent, damagePercent: weapon.damagePercent, disruptionDurationSeconds: weapon.effectDurationSeconds ?? 0, damageAppliedPercent: 0, interceptedBy: null, status: 'in_flight', hit })
+  browserState.engagements.push({ id, elapsedSeconds: browserState.elapsedSeconds, impactAtSeconds: browserState.elapsedSeconds + flightSeconds, unitId, unitName: unit.name, weaponId, weaponName: weapon.name, weaponKind: weapon.kind, contactId, contactLabel: contact.label, hitChancePercent, damagePercent: weapon.damagePercent, disruptionDurationSeconds: weapon.effectDurationSeconds ?? 0, damageAppliedPercent: 0, interceptedBy: null, effectTarget: weapon.effectTarget ?? 'defenses', status: 'in_flight', hit })
   browserState.engagements = browserState.engagements.slice(-50)
   addEvent(`${weapon.name} launched at ${contact.label} (${hitChancePercent}% solution)`, unit.name)
   return structuredClone(browserState)
@@ -459,7 +529,7 @@ function updateMissionCompletion() {
     hits: countStatus('hit'),
     damaged: countStatus('damaged'),
     intercepted: countStatus('intercepted'),
-    cyberDisruptions: countStatus('disrupted'),
+    cyberDisruptions: browserState.engagements.filter((engagement) => engagement.status === 'disrupted' || engagement.status === 'sensors_disrupted' || engagement.status === 'command_disrupted').length,
     spaceStrikes: browserState.engagements.filter((engagement) => engagement.weaponKind === 'asat').length,
     satellitesDisabled: countStatus('disabled'),
     misses: countStatus('miss'),
@@ -486,6 +556,20 @@ function recoverBrowserDisabledEffects() {
     contact.sensorsDisabledUntilSeconds = 0
     contact.sensorDisableSource = null
     addEvent(`Orbital sensing restored on ${contact.label}`, source)
+  }
+  for (const contact of browserState.contacts) {
+    if (contact.cyberSensorsDisruptedUntilSeconds === 0 || contact.cyberSensorsDisruptedUntilSeconds > browserState.elapsedSeconds) continue
+    const source = contact.sensorDisruptionSource ?? 'CYBER OPERATIONS'
+    contact.cyberSensorsDisruptedUntilSeconds = 0
+    contact.sensorDisruptionSource = null
+    addEvent(`Sensor systems restored on ${contact.label}`, source)
+  }
+  for (const contact of browserState.contacts) {
+    if (contact.cyberCommandDisruptedUntilSeconds === 0 || contact.cyberCommandDisruptedUntilSeconds > browserState.elapsedSeconds) continue
+    const source = contact.commandDisruptionSource ?? 'CYBER OPERATIONS'
+    contact.cyberCommandDisruptedUntilSeconds = 0
+    contact.commandDisruptionSource = null
+    addEvent(`Command control restored on ${contact.label}`, source)
   }
 }
 
