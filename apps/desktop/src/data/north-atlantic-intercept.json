@@ -23,7 +23,9 @@
         { "id": "sm-6", "name": "SM-6", "kind": "missile", "rangeNm": 120, "domains": ["air"], "ammunition": 8, "hitChancePercent": 78, "speedKnots": 2000, "damagePercent": 80 },
         { "id": "harpoon", "name": "Harpoon", "kind": "missile", "rangeNm": 70, "domains": ["surface"], "ammunition": 8, "hitChancePercent": 72, "speedKnots": 550, "damagePercent": 100 },
         { "id": "cyber-disruptor", "name": "Cyber Disruptor", "kind": "cyber", "rangeNm": 120, "domains": ["surface", "air", "subsurface"], "ammunition": 2, "hitChancePercent": 78, "speedKnots": 5000, "damagePercent": 0, "effectDurationSeconds": 900 },
-        { "id": "sm-3-asat", "name": "SM-3 ERAM", "kind": "asat", "rangeNm": 900, "domains": ["space"], "ammunition": 4, "hitChancePercent": 70, "speedKnots": 4500, "damagePercent": 0, "effectDurationSeconds": 1800 }
+        { "id": "sm-3-asat", "name": "SM-3 ERAM", "kind": "asat", "rangeNm": 900, "domains": ["space"], "ammunition": 4, "hitChancePercent": 70, "speedKnots": 4500, "damagePercent": 0, "effectDurationSeconds": 1800 },
+        { "id": "sensor-spoof", "name": "Sensor Spoof Suite", "kind": "cyber", "effectTarget": "sensors", "rangeNm": 120, "domains": ["surface", "air", "subsurface"], "ammunition": 2, "hitChancePercent": 76, "speedKnots": 5000, "damagePercent": 0, "effectDurationSeconds": 5400 },
+        { "id": "command-virus", "name": "Command Network Virus", "kind": "cyber", "effectTarget": "command", "rangeNm": 120, "domains": ["surface", "air", "subsurface"], "ammunition": 2, "hitChancePercent": 76, "speedKnots": 5000, "damagePercent": 0, "effectDurationSeconds": 1800 }
       ]
     },
     {
@@ -125,6 +127,18 @@
           { "startSeconds": 30900, "durationSeconds": 900 }
         ]
       }
+    },
+    {
+      "id": "c-105",
+      "label": "UNKNOWN SURFACE",
+      "classification": "Surface contact",
+      "confidence": 64,
+      "bearing": 47,
+      "rangeNm": 88.5,
+      "domain": "surface",
+      "position": { "x": 8, "z": -10 },
+      "identified": false,
+      "groundTrack": { "heading": 225, "speedKnots": 18 }
     }
   ],
   "objectives": [

@@ -546,8 +546,9 @@ mod tests {
         let scenario = ScenarioDefinition::parse(SCENARIO).expect("starter scenario is valid");
         assert_eq!(scenario.id, "north-atlantic-intercept");
         assert_eq!(scenario.units.len(), 3);
-        assert_eq!(scenario.contacts.len(), 4);
+        assert_eq!(scenario.contacts.len(), 5);
         assert_eq!(scenario.contacts[3].domain, "space");
+        assert_eq!(scenario.contacts[4].ground_track.as_ref().unwrap().speed_knots, 18);
         assert_eq!(scenario.coastlines.len(), 3);
     }
 
@@ -775,9 +776,17 @@ mod tests {
     #[test]
     fn parses_weapon_loadouts_and_rejects_invalid_accuracy() {
         let scenario = ScenarioDefinition::parse(SCENARIO).expect("weapon loadouts are valid");
-        assert_eq!(scenario.units[0].weapons.len(), 4);
+        assert_eq!(scenario.units[0].weapons.len(), 6);
         assert_eq!(scenario.units[0].weapons[2].kind, "cyber");
         assert_eq!(scenario.units[0].weapons[3].kind, "asat");
+        assert_eq!(
+            scenario.units[0].weapons[4].effect_target.as_deref(),
+            Some("sensors")
+        );
+        assert_eq!(
+            scenario.units[0].weapons[5].effect_target.as_deref(),
+            Some("command")
+        );
 
         let legacy_scenario = SCENARIO.replace(", \"damagePercent\": 80", "");
         let legacy =

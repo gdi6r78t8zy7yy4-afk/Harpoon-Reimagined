@@ -1244,7 +1244,7 @@ mod tests {
         let original_confidence = state.contacts[0].confidence;
         let reports = state.sensor_sweep("ddg-01", "spyd-1").unwrap();
 
-        assert_eq!(reports, 2);
+        assert_eq!(reports, 3);
         assert_eq!(state.contacts[0].confidence, original_confidence + 10);
         assert!(state.contacts[0].range_nm < 60.0);
         assert_eq!(state.contacts[2].confidence, 31);
@@ -1255,7 +1255,7 @@ mod tests {
             .last()
             .unwrap()
             .message
-            .contains("2 contact report"));
+            .contains("3 contact report"));
     }
 
     #[test]
@@ -1537,43 +1537,9 @@ mod tests {
     }
 
     fn state_with_cyber_effects() -> SimulationState {
-        let mut value: serde_json::Value =
-            serde_json::from_str(super::STARTER_SCENARIO).unwrap();
-        // Deterministic effect weapons and a moving target for M12 rules tests.
-        value["units"][0]["weapons"]
-            .as_array_mut()
-            .unwrap()
-            .extend([
-                serde_json::json!({
-                    "id": "sensor-spoof",
-                    "name": "Sensor Spoof Suite",
-                    "kind": "cyber",
-                    "effectTarget": "sensors",
-                    "rangeNm": 400.0,
-                    "domains": ["surface", "air", "subsurface"],
-                    "ammunition": 3,
-                    "hitChancePercent": 80,
-                    "speedKnots": 4000,
-                    "damagePercent": 0,
-                    "effectDurationSeconds": 7200
-                }),
-                serde_json::json!({
-                    "id": "command-virus",
-                    "name": "Command Network Virus",
-                    "kind": "cyber",
-                    "effectTarget": "command",
-                    "rangeNm": 400.0,
-                    "domains": ["surface", "air", "subsurface"],
-                    "ammunition": 3,
-                    "hitChancePercent": 80,
-                    "speedKnots": 4000,
-                    "damagePercent": 0,
-                    "effectDurationSeconds": 1800
-                }),
-            ]);
-        value["contacts"][1]["groundTrack"] =
-            serde_json::json!({ "heading": 90.0, "speedKnots": 12 });
-        SimulationState::from_scenario_json(&value.to_string()).unwrap()
+        // The starter scenario ships sensor/command effect weapons and an
+        // underway surface contact (c-105) for M12 rules tests.
+        SimulationState::from_scenario_json(super::STARTER_SCENARIO).unwrap()
     }
 
     #[test]
@@ -1588,7 +1554,7 @@ mod tests {
         assert_eq!(state.engagements[0].status, "sensors_disrupted");
         assert_eq!(
             state.contacts[0].cyber_sensors_disrupted_until_seconds,
-            impact + 7200
+            impact + 5400
         );
         assert_eq!(
             state.contacts[0].sensor_disruption_source.as_deref(),
@@ -1616,40 +1582,47 @@ mod tests {
     #[test]
     fn command_attack_freezes_ground_track_until_the_window_closes() {
         let mut state = state_with_cyber_effects();
-        // c-102 is authored underway at 12 kt; confirm it moves before the strike.
+        // c-105 is authored underway at 18 kt; confirm it moves before the strike.
+        let start = (state.contacts[4].x, state.contacts[4].z);
         state.advance(3600);
-        assert!((state.contacts[1].x - 15.0).abs() < 0.01, "x={}", state.contacts[1].x);
+        let drifted = ((state.contacts[4].x - start.0).powi(2)
+            + (state.contacts[4].z - start.1).powi(2))
+        .sqrt();
+        assert!((drifted - 18.0).abs() < 0.05, "underway drift {drifted}");
 
-        state.classify_contact("c-102", "hostile").unwrap();
-        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "command-virus", "c-102");
-        state.fire_weapon("ddg-01", "command-virus", "c-102").unwrap();
+        state.classify_contact("c-105", "hostile").unwrap();
+        aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "command-virus", "c-105");
+        state.fire_weapon("ddg-01", "command-virus", "c-105").unwrap();
         let impact = state.engagements[0].impact_at_seconds;
         state.advance(impact - state.elapsed_seconds);
 
         assert_eq!(state.engagements[0].status, "command_disrupted");
-        let contact = &state.contacts[1];
+        let contact = &state.contacts[4];
         assert_eq!(contact.cyber_command_disrupted_until_seconds, impact + 1800);
         assert_eq!(
             contact.command_disruption_source.as_deref(),
             Some("Command Network Virus")
         );
 
-        let frozen_x = state.contacts[1].x;
+        let frozen = (state.contacts[4].x, state.contacts[4].z);
         state.advance(600);
-        assert!((state.contacts[1].x - frozen_x).abs() < 0.001, "must hold station");
+        assert!((state.contacts[4].x - frozen.0).abs() < 0.001, "must hold station");
+        assert!((state.contacts[4].z - frozen.1).abs() < 0.001, "must hold station");
 
-        let until = state.contacts[1].cyber_command_disrupted_until_seconds;
+        let until = state.contacts[4].cyber_command_disrupted_until_seconds;
         state.advance(until - state.elapsed_seconds + 1);
-        assert_eq!(state.contacts[1].cyber_command_disrupted_until_seconds, 0);
+        assert_eq!(state.contacts[4].cyber_command_disrupted_until_seconds, 0);
         assert!(state.events.iter().any(|event| event.source == "Command Network Virus"
             && event.message.contains("Command control restored")));
 
         // Motion resumes from the held position at the authored speed. The
         // recovery step itself already advances past the window end, so it
-        // contributes motion too: 1201 s + 3600 s at 12 kt ≈ 16 map units.
+        // contributes motion too: 1201 s + 3600 s at 18 kt ≈ 24 map units.
         state.advance(3600);
-        let resumed = state.contacts[1].x - frozen_x;
-        assert!((resumed - 16.0).abs() < 0.1, "resumed drift {resumed}");
+        let resumed = ((state.contacts[4].x - frozen.0).powi(2)
+            + (state.contacts[4].z - frozen.1).powi(2))
+        .sqrt();
+        assert!((resumed - 24.0).abs() < 0.1, "resumed drift {resumed}");
     }
 
     #[test]
@@ -1671,7 +1644,7 @@ mod tests {
         let contact = &state.contacts[0];
         assert_eq!(contact.defenses_disrupted_until_seconds, defenses_impact + 900);
         let first_sensors_end = contact.cyber_sensors_disrupted_until_seconds;
-        assert_eq!(first_sensors_end, sensors_impact + 7200);
+        assert_eq!(first_sensors_end, sensors_impact + 5400);
 
         // A second sensor attack extends from the current window end.
         aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "sensor-spoof", "c-101");
@@ -1681,7 +1654,7 @@ mod tests {
         state.advance(second_impact - state.elapsed_seconds);
         assert_eq!(
             state.contacts[0].cyber_sensors_disrupted_until_seconds,
-            first_sensors_end + 7200
+            first_sensors_end + 5400
         );
     }
 
@@ -1796,7 +1769,7 @@ mod tests {
                 .iter()
                 .filter(|event| event.message.starts_with("Track is stale:"))
                 .count(),
-            4
+            5
         );
         state.advance(60);
         assert_eq!(
@@ -1805,7 +1778,7 @@ mod tests {
                 .iter()
                 .filter(|event| event.message.starts_with("Track is stale:"))
                 .count(),
-            4
+            5
         );
     }
 
@@ -1930,13 +1903,13 @@ mod tests {
     #[test]
     fn satellite_ground_track_wraps_at_the_map_edge() {
         let mut state = state_with_satellite();
-        assert_eq!(state.contacts[3].x, -20.0);
+        assert_eq!(state.contacts[4].x, -20.0);
 
         advance_until(&mut state, 15_510 + 7_200);
 
-        assert_ne!(state.contacts[3].x, -20.0);
-        assert!((-50.0..=50.0).contains(&state.contacts[3].x));
-        assert!((-50.0..=50.0).contains(&state.contacts[3].z));
+        assert_ne!(state.contacts[4].x, -20.0);
+        assert!((-50.0..=50.0).contains(&state.contacts[4].x));
+        assert!((-50.0..=50.0).contains(&state.contacts[4].z));
     }
 
     #[test]
@@ -1979,15 +1952,15 @@ mod tests {
         state.advance(seconds_to_impact);
 
         assert_eq!(state.engagements[0].status, "disabled");
-        assert_eq!(state.contacts[3].health, 100);
-        assert!(!state.contacts[3].destroyed);
-        let disabled_until = state.contacts[3].sensors_disabled_until_seconds;
+        assert_eq!(state.contacts[4].health, 100);
+        assert!(!state.contacts[4].destroyed);
+        let disabled_until = state.contacts[4].sensors_disabled_until_seconds;
         assert_eq!(disabled_until, state.engagements[0].impact_at_seconds + 1800);
         assert_eq!(
-            state.contacts[3].sensor_disable_source.as_deref(),
+            state.contacts[4].sensor_disable_source.as_deref(),
             Some("SM-3 ERAM")
         );
-        assert_eq!(state.contacts[3].hardening_until_seconds, disabled_until + 600);
+        assert_eq!(state.contacts[4].hardening_until_seconds, disabled_until + 600);
         assert!(state.events.iter().any(|event| {
             event.source == "COUNTER-SPACE" && event.message.contains("disabled")
         }));
@@ -1998,7 +1971,7 @@ mod tests {
             .contains("hardened"));
 
         advance_until(&mut state, disabled_until + 1);
-        assert_eq!(state.contacts[3].sensors_disabled_until_seconds, 0);
+        assert_eq!(state.contacts[4].sensors_disabled_until_seconds, 0);
         assert!(state.events.iter().any(|event| {
             event.message == "Orbital sensing restored on HOSTILE SPACE"
                 && event.source == "SM-3 ERAM"
@@ -2006,7 +1979,7 @@ mod tests {
 
         // Hardening outlasts the disable window; launches resume once it expires.
         assert!(state.fire_weapon("ddg-01", "asat-1", "sat-1").is_err());
-        let hardened_until = state.contacts[3].hardening_until_seconds;
+        let hardened_until = state.contacts[4].hardening_until_seconds;
         advance_until(&mut state, hardened_until + 1);
         aim_the_next_engagement_for_a_hit(&mut state, "ddg-01", "asat-1", "sat-1");
         state.fire_weapon("ddg-01", "asat-1", "sat-1").unwrap();
@@ -2015,7 +1988,7 @@ mod tests {
     #[test]
     fn disabled_satellite_misses_its_pass_window() {
         let mut state = state_with_satellite();
-        state.contacts[3].sensors_disabled_until_seconds = 25_000;
+        state.contacts[4].sensors_disabled_until_seconds = 25_000;
         let reports_before = state.contacts[0].report_count;
 
         advance_until(&mut state, 20_001);
@@ -2034,7 +2007,7 @@ mod tests {
     fn asat_interception_consumes_charge_and_triggers_hardening() {
         let mut state = state_with_satellite();
         state.classify_contact("sat-1", "hostile").unwrap();
-        state.contacts[3].defenses.push(super::DefenseSystem {
+        state.contacts[4].defenses.push(super::DefenseSystem {
             id: "nasat".into(),
             name: "Nudol ASAT defense".into(),
             remaining_charges: 2,
@@ -2047,10 +2020,10 @@ mod tests {
         state.advance(seconds_to_impact);
 
         assert_eq!(state.engagements[0].status, "intercepted");
-        assert_eq!(state.contacts[3].defenses[0].remaining_charges, 1);
-        assert_eq!(state.contacts[3].sensors_disabled_until_seconds, 0);
+        assert_eq!(state.contacts[4].defenses[0].remaining_charges, 1);
+        assert_eq!(state.contacts[4].sensors_disabled_until_seconds, 0);
         assert_eq!(
-            state.contacts[3].hardening_until_seconds,
+            state.contacts[4].hardening_until_seconds,
             state.engagements[0].impact_at_seconds + 600
         );
 
