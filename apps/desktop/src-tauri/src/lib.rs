@@ -134,7 +134,17 @@ fn record_scenario_result(progress: &mut CampaignProgress, simulation: &Simulati
         hits: count_status("hit"),
         damaged: count_status("damaged"),
         intercepted: count_status("intercepted"),
-        cyber_disruptions: count_status("disrupted"),
+        cyber_disruptions: simulation
+            .engagements
+            .iter()
+            .filter(|engagement| {
+                matches!(
+                    engagement.status.as_str(),
+                    "disrupted" | "sensors_disrupted" | "command_disrupted"
+                )
+            })
+            .count()
+            .min(u16::MAX as usize) as u16,
         space_strikes: simulation
             .engagements
             .iter()
@@ -620,6 +630,8 @@ mod tests {
             ("damaged", "missile"),
             ("intercepted", "asat"),
             ("disrupted", "cyber"),
+            ("sensors_disrupted", "cyber"),
+            ("command_disrupted", "cyber"),
             ("disabled", "asat"),
             ("miss", "missile"),
             ("aborted", "missile"),
@@ -639,15 +651,30 @@ mod tests {
             contact_label: "Hostile surface".into(),
             hit_chance_percent: 80,
             damage_percent: 50,
-            disruption_duration_seconds: if matches!(status, "disrupted" | "disabled") {
+            disruption_duration_seconds: if matches!(
+                status,
+                "disrupted" | "sensors_disrupted" | "command_disrupted" | "disabled"
+            ) {
                 900
             } else {
                 0
             },
             damage_applied_percent: 50,
             intercepted_by: None,
+            effect_target: if kind == "cyber" {
+                match status {
+                    "sensors_disrupted" => "sensors".into(),
+                    "command_disrupted" => "command".into(),
+                    _ => "defenses".into(),
+                }
+            } else {
+                String::new()
+            },
             status: status.into(),
-            hit: matches!(status, "hit" | "damaged" | "disrupted" | "disabled"),
+            hit: matches!(
+                status,
+                "hit" | "damaged" | "disrupted" | "sensors_disrupted" | "command_disrupted" | "disabled"
+            ),
         })
         .collect();
         let mut campaign = CampaignProgress::default();
@@ -664,11 +691,11 @@ mod tests {
         assert_eq!(result.completed_at_seconds, 12_345);
         assert_eq!(result.contacts_classified, 1);
         assert_eq!(result.targets_destroyed, 1);
-        assert_eq!(result.engagements_launched, 7);
+        assert_eq!(result.engagements_launched, 9);
         assert_eq!(result.hits, 1);
         assert_eq!(result.damaged, 1);
         assert_eq!(result.intercepted, 1);
-        assert_eq!(result.cyber_disruptions, 1);
+        assert_eq!(result.cyber_disruptions, 3);
         assert_eq!(result.space_strikes, 2);
         assert_eq!(result.satellites_disabled, 1);
         assert_eq!(result.misses, 1);
@@ -700,6 +727,7 @@ mod tests {
             disruption_duration_seconds: 900,
             damage_applied_percent: 0,
             intercepted_by: None,
+            effect_target: "defenses".into(),
             status: status.into(),
             hit: true,
         };
@@ -711,9 +739,9 @@ mod tests {
         record_scenario_result(&mut campaign, &simulation);
         assert_eq!(campaign.escalation_level, 2);
 
-        // A second scenario that only used cyber adds one more level.
+        // A second scenario that only used cyber (sensor attack) adds one more level.
         simulation.scenario_id = "second-scenario".into();
-        simulation.engagements = vec![engagement("cyber", "disrupted")];
+        simulation.engagements = vec![engagement("cyber", "sensors_disrupted")];
         record_scenario_result(&mut campaign, &simulation);
         assert_eq!(campaign.escalation_level, 3);
 
