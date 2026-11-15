@@ -102,6 +102,16 @@ Follow-up work can improve multi-sensor report fusion and provide richer uncerta
 - [x] Record counterspace actions in the after-action report and expose at least one escalation-gated campaign consequence.
 - **Exit:** a scenario can be played where blinding or restoring orbital sensing changes the tactical picture and is remembered by the campaign save.
 
+## M12 — Sensor and command disruption (in progress)
+
+- [x] Define sensor/command cyber effects, moving-contact rules, recovery, and attribution in [cyber domain notes](../game-design/cyber-domain.md).
+- [ ] Add the optional `effectTarget` weapon field with validation limited to cyber weapons.
+- [ ] Allow authored ground-track motion on surface, air, and subsurface contacts within domain speed bounds.
+- [ ] Implement sensor disruption: degraded track aging, classification loss below threshold, and recovery events in the simulation core.
+- [ ] Implement command disruption: ground-track motion freeze with stacking and recovery.
+- [ ] Surface per-system disruption state, new engagement outcomes, and starter content for both effects in the interface.
+- **Exit:** a scenario can be played where blinding or freezing a hostile visibly degrades or halts its track, costs or preserves the firing solution, and recovers on a bounded window.
+
 ## Future weapon domains (planned)
 
 - Extend cyber weapons beyond defense suppression to sensor and command-system disruption, with clear duration and recovery rules and player-visible attribution. Define these rules before implementation.
